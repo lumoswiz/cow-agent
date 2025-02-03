@@ -24,7 +24,12 @@ jobs:
 
       - uses: ApeWorX/github-action@v3
         with:
+          python-version: '3.10'
           ape-version-pin: '0.8.25'
+          ape-plugins-list: 'alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7 solidity==0.8.5'
+
+      - name: Compile contracts
+        run: ape compile
 
       - name: Run tests
         run: ape test -s
