@@ -1,1 +1,11 @@
 name: cow-agent
+
+plugins:
+  - name: alchemy
+    version: 0.8.7
+  - name: etherscan
+    version: 0.8.4
+  - name: foundry
+    version: 0.8.7
+  - name: solidity
+    version: 0.8.5
