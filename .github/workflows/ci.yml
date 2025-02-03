@@ -26,7 +26,14 @@ jobs:
         with:
           python-version: '3.11'
           ape-version-pin: '0.8.25'
-          ape-plugins-list: 'alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7 solidity==0.8.5'
+
+      - name: Install ape plugins
+        run: |
+          ape plugins install solidity==0.8.5
+          ape plugins install alchemy==0.8.7
+          ape plugins install etherscan==0.8.4
+          ape plugins install foundry==0.8.7
+          ape plugins list
 
       - name: Debug directory structure
         run: |
