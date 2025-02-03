@@ -28,12 +28,7 @@ jobs:
           ape-version-pin: '0.8.25'
 
       - name: Install ape plugins
-        run: |
-          ape plugins install solidity==0.8.5
-          ape plugins install alchemy==0.8.7
-          ape plugins install etherscan==0.8.4
-          ape plugins install foundry==0.8.7
-          ape plugins list
+        run: ape plugins install .
 
       - name: Debug directory structure
         run: |
