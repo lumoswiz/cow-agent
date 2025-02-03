@@ -1,0 +1,21 @@
+[project]
+name = "cow-agent"
+version = "0.1.0"
+description = "Automated CoW Swap trading agent built with Silverback SDK"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["eth-ape>=0.8.25", "silverback>=0.7.0"]
+
+[tool.uv]
+dev-dependencies = ["pre-commit>=4.0.1", "ruff>=0.9.1"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", # pycodestyle errors
+    "F", # pyflakes
+    "I", # isort
+]
