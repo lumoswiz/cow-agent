@@ -24,12 +24,12 @@ jobs:
 
       - uses: ApeWorX/github-action@v3
         with:
-          python-version: '3.10'
+          python-version: '3.11'
           ape-version-pin: '0.8.25'
           ape-plugins-list: 'alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7 solidity==0.8.5'
 
       - name: Install contract dependencies
-        run: ape pm install
+        run: ape pm install gh:Vectorized/solady@v0.1.3 --name solady
 
       - name: Compile contracts
         run: ape compile
