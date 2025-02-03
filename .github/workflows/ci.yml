@@ -24,7 +24,7 @@ jobs:
 
       - uses: ApeWorX/github-action@v3
         with:
-          ape-version-pin: '>=0.8.25'
+          ape-version-pin: '0.8.25'
 
       - name: Run tests
         run: ape test -s
