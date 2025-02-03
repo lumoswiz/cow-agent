@@ -28,6 +28,9 @@ jobs:
           ape-version-pin: '0.8.25'
           ape-plugins-list: 'alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7 solidity==0.8.5'
 
+      - name: Install contract dependencies
+        run: ape pm install
+
       - name: Compile contracts
         run: ape compile
 
