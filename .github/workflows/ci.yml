@@ -20,10 +20,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
-      - name: Run Ruff
-        run: |
-          ruff check --output-format=github .
-          ruff format --check .
+      - uses: astral-sh/ruff-action@v3
 
       - uses: ApeWorX/github-action@v3
         with:
