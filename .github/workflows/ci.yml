@@ -28,11 +28,22 @@ jobs:
           ape-version-pin: '0.8.25'
           ape-plugins-list: 'alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7 solidity==0.8.5'
 
+      - name: Debug directory structure
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Contents of current directory:"
+          ls -la
+          echo "Contents of contracts directory:"
+          ls -la contracts/
+          echo "Installed plugins:"
+          ape plugins list
+
       - name: Install contract dependencies
         run: ape pm install gh:Vectorized/solady --name solady --ref v0.1.3
 
       - name: Compile contracts
-        run: ape compile
+        run: ape compile --include-dependencies -f
 
       - name: Run tests
         run: ape test -s
