@@ -13,21 +13,21 @@ contract TokenAllowlist is Ownable {
         _initializeOwner(msg.sender);
     }
 
-    function addToken(address token) external {
+    function addToken(address token) external onlyOwner {
         allowList.add(token);
     }
 
-    function addTokensBatch(address[] memory tokens) external {
+    function addTokensBatch(address[] memory tokens) external onlyOwner {
         for (uint256 i; i < tokens.length; ++i) {
             allowList.add(tokens[i]);
         }
     }
 
-    function removeToken(address token) external {
+    function removeToken(address token) external onlyOwner {
         allowList.remove(token);
     }
 
-    function removeTokensBatch(address[] memory tokens) external {
+    function removeTokensBatch(address[] memory tokens) external onlyOwner {
         for (uint256 i; i < tokens.length; ++i) {
             allowList.remove(tokens[i]);
         }
