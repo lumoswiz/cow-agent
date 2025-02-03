@@ -24,6 +24,7 @@ jobs:
 
       - name: Install ape plugins
         run: |
+          uv pip install eth-ape==0.8.25
           uv pip install ape-solidity==0.8.5 ape-alchemy==0.8.7 ape-etherscan==0.8.4 ape-foundry==0.8.7
           ape plugins list
 
