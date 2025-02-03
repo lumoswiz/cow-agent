@@ -9,5 +9,6 @@ wheels/
 # Virtual environments
 .venv
 
-# Unit test
+# Ape
 .pytest_cache/
+.build/
