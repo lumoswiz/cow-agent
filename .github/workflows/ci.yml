@@ -12,7 +12,7 @@ jobs:
     name: python
     runs-on: ubuntu-latest
     env:
-      UV_PROJECT_ENVIRONMENT: 1
+      UV_SYSTEM_PYTHON: 1
 
     steps:
       - uses: actions/checkout@v4
