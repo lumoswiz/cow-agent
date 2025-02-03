@@ -1,4 +1,5 @@
 name: CI
+
 on:
   workflow_dispatch:
   pull_request:
@@ -7,24 +8,39 @@ on:
       - 'main'
 
 jobs:
-  test:
+  uv-example:
+    name: python
     runs-on: ubuntu-latest
+    env:
+      UV_SYSTEM_PYTHON: 1
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.5.26'
+
+      - name: 'Set up Python'
+        uses: actions/setup-python@v5
         with:
           python-version-file: 'pyproject.toml'
 
-      - name: Install dependencies
+      - name: Install project and dependencies
         run: uv sync --all-extras --dev
-
-      - uses: astral-sh/ruff-action@v3
 
       - uses: ApeWorX/github-action@v3
         with:
+          python-version: '3.11'
           ape-version-pin: '0.8.25'
+          ape-plugins-list: 'solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7'
+
+      - name: Install contract dependencies
+        run: ape pm install gh:Vectorized/solady --name solady --ref v0.1.3
+
+      - name: Compile contracts
+        run: ape compile --force
 
       - name: Run tests
         run: ape test -s

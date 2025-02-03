@@ -9,3 +9,11 @@ plugins:
     version: 0.8.7
   - name: solidity
     version: 0.8.5
+
+solidity:
+  version: 0.8.25
+
+dependencies:
+  - name: Solady
+    github: Vectorized/solady
+    ref: v0.1.3
