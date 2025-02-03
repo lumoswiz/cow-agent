@@ -22,13 +22,10 @@ jobs:
 
       - uses: astral-sh/ruff-action@v3
 
-      - uses: ApeWorX/github-action@v3
-        with:
-          python-version: '3.11'
-          ape-version-pin: '0.8.25'
-
       - name: Install ape plugins
-        run: ape plugins install .
+        run: |
+          uv pip install ape-solidity==0.8.5 ape-alchemy==0.8.7 ape-etherscan==0.8.4 ape-foundry==0.8.7
+          ape plugins list
 
       - name: Debug directory structure
         run: |
