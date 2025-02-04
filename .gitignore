@@ -18,3 +18,6 @@ abi/
 
 # Environment vars
 .env
+
+# Local storage
+.db
