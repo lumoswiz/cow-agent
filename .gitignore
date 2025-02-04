@@ -1,26 +1,48 @@
-# Python-generated files
+# Silverback
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
 .venv
-
-# Ape
 .pytest_cache/
 .build/
+.silverback*
+.ruff*
 
-# Abi
+# Bun
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.npm
+.eslintcache
+.yarn/
+.pnp.*
+.cache
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.*
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+
+# Project specific
+.db/
 abi/
 
-# Environment vars
-.env
-
-# Local storage
-.db
-
-# Silverback
-.silverback*
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
