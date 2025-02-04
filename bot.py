@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from ape import Contract, accounts, chain
 from ape.types import LogFilter
-from silverback import SilverbackBot
+from silverback import SilverbackBot, StateSnapshot
 
 # Initialize bot
 bot = SilverbackBot()
@@ -111,3 +111,16 @@ def _process_historical_gno_trades(
 
     _save_trades_db(trades_db)
     return trades_db
+
+
+# Silverback bot
+@bot.on_startup()
+def app_startup(startup_state: StateSnapshot):
+    _process_historical_gno_trades(
+        GPV2_SETTLEMENT_CONTRACT,
+        GNO_ADDRESS,
+        start_block=START_BLOCK,
+        stop_block=chain.blocks.head.number,
+    )
+
+    return {"message": "Starting...", "block_number": startup_state.last_block_seen}
