@@ -14,6 +14,7 @@ bot = SilverbackBot()
 
 # File path configuration
 TRADE_FILEPATH = os.environ.get("TRADE_FILEPATH", ".db/trades.csv")
+BLOCK_FILEPATH = os.environ.get("BLOCK_FILEPATH", ".db/block.csv")
 GPV2_ABI_FILEPATH = os.environ.get("GPV2_ABI_FILEPATH", "./abi/GPv2Settlement.json")
 
 # Load GPv2Settlement ABI
@@ -63,6 +64,23 @@ def _save_trades_db(trades_dict: Dict) -> None:
     df = pd.DataFrame.from_dict(trades_dict, orient="index")
     df.index.name = "transaction_hash"
     df.to_csv(TRADE_FILEPATH)
+
+
+def _load_block_db() -> Dict:
+    """Load the last processed block from CSV file or create new if doesn't exist"""
+    df = (
+        pd.read_csv(BLOCK_FILEPATH)
+        if os.path.exists(BLOCK_FILEPATH)
+        else pd.DataFrame({"last_processed_block": [START_BLOCK]})
+    )
+    return {"last_processed_block": df["last_processed_block"].iloc[0]}
+
+
+def _save_block_db(data: Dict):
+    """Save the last processed block to CSV file"""
+    os.makedirs(os.path.dirname(BLOCK_FILEPATH), exist_ok=True)
+    df = pd.DataFrame([data])
+    df.to_csv(BLOCK_FILEPATH, index=False)
 
 
 # Historical log helper functions
@@ -116,11 +134,16 @@ def _process_historical_gno_trades(
 # Silverback bot
 @bot.on_startup()
 def app_startup(startup_state: StateSnapshot):
+    block_db = _load_block_db()
+    last_processed_block = block_db["last_processed_block"]
+
     _process_historical_gno_trades(
         GPV2_SETTLEMENT_CONTRACT,
         GNO_ADDRESS,
-        start_block=START_BLOCK,
+        start_block=last_processed_block,
         stop_block=chain.blocks.head.number,
     )
+
+    _save_block_db({"last_processed_block": chain.blocks.head.number})
 
     return {"message": "Starting...", "block_number": startup_state.last_block_seen}
