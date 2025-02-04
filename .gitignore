@@ -12,3 +12,6 @@ wheels/
 # Ape
 .pytest_cache/
 .build/
+
+# Abi
+abi/
