@@ -5,7 +5,8 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
-from ape import Contract, chain
+from ape import Contract, accounts, chain
+from ape.types import LogFilter
 from silverback import SilverbackBot
 
 # Initialize bot
@@ -62,3 +63,51 @@ def _save_trades_db(trades_dict: Dict) -> None:
     df = pd.DataFrame.from_dict(trades_dict, orient="index")
     df.index.name = "transaction_hash"
     df.to_csv(TRADE_FILEPATH)
+
+
+# Historical log helper functions
+def _process_trade_log(log) -> Dict:
+    """Process trade log and return formatted dictionary entry"""
+    return {
+        "block_number": log.block_number,
+        "owner": log.owner,
+        "sellToken": log.sellToken,
+        "buyToken": log.buyToken,
+        "sellAmount": str(log.sellAmount),
+        "buyAmount": str(log.buyAmount),
+        "timestamp": log.timestamp,
+    }
+
+
+def _get_historical_gno_trades(
+    settlement_contract,
+    gno_address: str,
+    start_block: int,
+    stop_block: int = chain.blocks.head.number,
+):
+    """Get historical GNO trades from start_block to stop_block"""
+    log_filter = LogFilter(
+        addresses=[settlement_contract.address],
+        events=[settlement_contract.Trade.abi],
+        start_block=start_block,
+        stop_block=stop_block,
+    )
+
+    for log in accounts.provider.get_contract_logs(log_filter):
+        if log.sellToken == gno_address or log.buyToken == gno_address:
+            yield log
+
+
+def _process_historical_gno_trades(
+    settlement_contract, gno_address: str, start_block: int, stop_block: int
+) -> Dict:
+    """Process historical GNO trades and store in database"""
+    trades_db = _load_trades_db()
+
+    for log in _get_historical_gno_trades(
+        settlement_contract, gno_address, start_block, stop_block
+    ):
+        trades_db[log.transaction_hash] = _process_trade_log(log)
+
+    _save_trades_db(trades_db)
+    return trades_db
