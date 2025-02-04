@@ -108,6 +108,8 @@ jobs:
     name: 'CoW Trader Test'
     needs: ['trader-lint', 'trader-build']
     runs-on: 'ubuntu-latest'
+    env:
+      UV_SYSTEM_PYTHON: 1
     defaults:
       run:
         working-directory: './cow-trader'
