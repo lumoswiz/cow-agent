@@ -12,3 +12,15 @@ wheels/
 # Ape
 .pytest_cache/
 .build/
+
+# Abi
+abi/
+
+# Environment vars
+.env
+
+# Local storage
+.db
+
+# Silverback
+.silverback*
