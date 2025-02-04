@@ -9,6 +9,7 @@ wheels/
 .pytest_cache/
 .build/
 .silverback*
+.ruff*
 
 # Bun
 node_modules/
