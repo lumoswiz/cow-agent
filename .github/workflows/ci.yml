@@ -5,125 +5,126 @@ on:
   pull_request:
   push:
     branches:
-      - "main"
+      - 'main'
 
 jobs:
   lint:
+    name: 'Smart Contract Infra Lint'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./smart-contract-infra
     steps:
-      - name: "Checkout the repo"
+      - name: 'Checkout the repo'
         uses: actions/checkout@v4
 
-      - name: "Install Bun"
+      - name: 'Install Bun'
         uses: oven-sh/setup-bun@v1
 
-      - name: "Install the node.js dependencies"
+      - name: 'Install the node.js dependencies'
         run: bun install
 
-      - name: "Lint the code"
+      - name: 'Lint the code'
         run: bun run lint
 
-      - name: "Add lint summary"
+      - name: 'Add lint summary'
         run: |
           echo "## Lint result" >> $GITHUB_STEP_SUMMARY
           echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
 
   trader-lint:
-    name: "CoW Trader Lint"
-    runs-on: "ubuntu-latest"
+    name: 'CoW Trader Lint'
+    runs-on: 'ubuntu-latest'
     defaults:
       run:
-        working-directory: "./cow-trader"
+        working-directory: './cow-trader'
     steps:
-      - name: "Checkout the repo"
-        uses: "actions/checkout@v4"
-      - name: "Install UV"
-        uses: "astral-sh/setup-uv@v5"
+      - name: 'Checkout the repo'
+        uses: 'actions/checkout@v4'
+      - name: 'Install UV'
+        uses: 'astral-sh/setup-uv@v5'
         with:
-          version: "0.5.26"
-      - name: "Setup Python"
-        uses: "actions/setup-python@v5"
+          version: '0.5.26'
+      - name: 'Setup Python'
+        uses: 'actions/setup-python@v5'
         with:
-          python-version-file: "pyproject.toml"
-      - name: "Install dependencies"
-        run: "uv sync --all-extras --dev"
-      - name: "Lint"
+          python-version-file: './cow-trader/pyproject.toml'
+      - name: 'Install dependencies'
+        run: 'uv sync --all-extras --dev'
+      - name: 'Lint'
         run: |
           ruff check .
           ruff format --check .
-      - name: "Add lint summary"
+      - name: 'Add lint summary'
         run: |
           echo "## Lint result" >> $GITHUB_STEP_SUMMARY
           echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
 
   trader-build:
-    name: "CoW Trader Build"
-    runs-on: "ubuntu-latest"
+    name: 'CoW Trader Build'
+    runs-on: 'ubuntu-latest'
     defaults:
       run:
-        working-directory: "./cow-trader"
+        working-directory: './cow-trader'
     steps:
-      - name: "Checkout the repo"
-        uses: "actions/checkout@v4"
-      - name: "Install UV"
-        uses: "astral-sh/setup-uv@v5"
+      - name: 'Checkout the repo'
+        uses: 'actions/checkout@v4'
+      - name: 'Install UV'
+        uses: 'astral-sh/setup-uv@v5'
         with:
-          version: "0.5.26"
-      - name: "Setup Python"
-        uses: "actions/setup-python@v5"
+          version: '0.5.26'
+      - name: 'Setup Python'
+        uses: 'actions/setup-python@v5'
         with:
-          python-version-file: "pyproject.toml"
-      - name: "Install dependencies"
-        run: "uv sync --all-extras --dev"
-      - name: "Install Ape"
-        uses: "ApeWorX/github-action@v3"
+          python-version-file: './cow-trader/pyproject.toml'
+      - name: 'Install dependencies'
+        run: 'uv sync --all-extras --dev'
+      - name: 'Install Ape'
+        uses: 'ApeWorX/github-action@v3'
         with:
-          python-version: "3.11"
-          ape-version-pin: "0.8.25"
-          ape-plugins-list: "solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7"
-      - name: "Install contract dependencies"
-        run: "ape pm install gh:Vectorized/solady --name solady --ref v0.1.3"
-      - name: "Compile contracts"
-        run: "ape compile --force"
-      - name: "Add build summary"
+          python-version: '3.11'
+          ape-version-pin: '0.8.25'
+          ape-plugins-list: 'solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7'
+      - name: 'Install contract dependencies'
+        run: 'ape pm install gh:Vectorized/solady --name solady --ref v0.1.3'
+      - name: 'Compile contracts'
+        run: 'ape compile --force'
+      - name: 'Add build summary'
         run: |
           echo "## Build result" >> $GITHUB_STEP_SUMMARY
           echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
 
   trader-test:
-    name: "CoW Trader Test"
-    needs: ["trader-lint", "trader-build"]
-    runs-on: "ubuntu-latest"
+    name: 'CoW Trader Test'
+    needs: ['trader-lint', 'trader-build']
+    runs-on: 'ubuntu-latest'
     defaults:
       run:
-        working-directory: "./cow-trader"
+        working-directory: './cow-trader'
     steps:
-      - name: "Checkout the repo"
-        uses: "actions/checkout@v4"
-      - name: "Install UV"
-        uses: "astral-sh/setup-uv@v5"
+      - name: 'Checkout the repo'
+        uses: 'actions/checkout@v4'
+      - name: 'Install UV'
+        uses: 'astral-sh/setup-uv@v5'
         with:
-          version: "0.5.26"
-      - name: "Setup Python"
-        uses: "actions/setup-python@v5"
+          version: '0.5.26'
+      - name: 'Setup Python'
+        uses: 'actions/setup-python@v5'
         with:
-          python-version-file: "pyproject.toml"
-      - name: "Install dependencies"
-        run: "uv sync --all-extras --dev"
-      - name: "Install Ape"
-        uses: "ApeWorX/github-action@v3"
+          python-version-file: './cow-trader/pyproject.toml'
+      - name: 'Install dependencies'
+        run: 'uv sync --all-extras --dev'
+      - name: 'Install Ape'
+        uses: 'ApeWorX/github-action@v3'
         with:
-          python-version: "3.11"
-          ape-version-pin: "0.8.25"
-          ape-plugins-list: "solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7"
-      - name: "Install contract dependencies"
-        run: "ape pm install gh:Vectorized/solady --name solady --ref v0.1.3"
-      - name: "Run tests"
-        run: "ape test -s"
-      - name: "Add test summary"
+          python-version: '3.11'
+          ape-version-pin: '0.8.25'
+          ape-plugins-list: 'solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7'
+      - name: 'Install contract dependencies'
+        run: 'ape pm install gh:Vectorized/solady --name solady --ref v0.1.3'
+      - name: 'Run tests'
+        run: 'ape test -s'
+      - name: 'Add test summary'
         run: |
           echo "## Tests result" >> $GITHUB_STEP_SUMMARY
           echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
