@@ -21,3 +21,6 @@ abi/
 
 # Local storage
 .db
+
+# Silverback
+.silverback*
