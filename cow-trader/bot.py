@@ -37,16 +37,15 @@ START_BLOCK = int(os.environ.get("START_BLOCK", chain.blocks.head.number))
 def _load_trades_db() -> Dict:
     """
     Load trades database from CSV file or create new if doesn't exist.
-    Returns dict with trade data indexed by transaction hash.
+    Returns dict with trade data indexed by block number.
     """
     dtype = {
-        "block_number": np.int64,
         "owner": str,
         "sellToken": str,
         "buyToken": str,
         "sellAmount": object,
         "buyAmount": object,
-        "timestamp": np.int64,
+        "block_number": np.int64,
     }
 
     df = (
@@ -54,16 +53,15 @@ def _load_trades_db() -> Dict:
         if os.path.exists(TRADE_FILEPATH)
         else pd.DataFrame(columns=dtype.keys()).astype(dtype)
     )
-    return df.set_index("block_number").to_dict("index")
+    return df.to_dict("records")
 
 
 def _save_trades_db(trades_dict: Dict) -> None:
     """
     Save trades dictionary back to CSV file.
     """
-    df = pd.DataFrame.from_dict(trades_dict, orient="index")
-    df.index.name = "transaction_hash"
-    df.to_csv(TRADE_FILEPATH)
+    df = pd.DataFrame(trades_dict)
+    df.to_csv(TRADE_FILEPATH, index=False)
 
 
 def _load_block_db() -> Dict:
@@ -93,7 +91,6 @@ def _process_trade_log(log) -> Dict:
         "buyToken": log.buyToken,
         "sellAmount": str(log.sellAmount),
         "buyAmount": str(log.buyAmount),
-        "timestamp": log.timestamp,
     }
 
 
@@ -125,7 +122,7 @@ def _process_historical_gno_trades(
     for log in _get_historical_gno_trades(
         settlement_contract, gno_address, start_block, stop_block
     ):
-        trades_db[log.transaction_hash] = _process_trade_log(log)
+        trades_db.append(_process_trade_log(log))
 
     _save_trades_db(trades_db)
     return trades_db
