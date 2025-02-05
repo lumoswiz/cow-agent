@@ -12,6 +12,10 @@ plugins:
 
 solidity:
   version: 0.8.25
+  import_remapping:
+    - '@gnosis.pm/safe-contracts=./contracts/dependencies/@gnosis.pm/safe-contracts'
+    - '@gnosis-guild/zodiac=./contracts/dependencies/@gnosis-guild/zodiac'
+    - '@openzeppelin/=contracts/dependencies/@openzeppelin/'
 
 dependencies:
   - name: Solady
