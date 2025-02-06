@@ -6,6 +6,7 @@
     "@gnosis-guild/zodiac": "4.0.3",
     "@gnosis.pm/safe-contracts": "1.3.0",
     "@openzeppelin/contracts-upgradeable": "5.2.0",
+    "cowprotocol/contracts": "github:cowprotocol/contracts#9c1984b",
     "solady": "0.1.6"
   },
   "devDependencies": {
