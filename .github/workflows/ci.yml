@@ -94,7 +94,7 @@ jobs:
           ape-plugins-list: 'solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7'
 
       - name: 'Install contract dependencies'
-        run: 'ape pm install gh:Vectorized/solady --name solady --ref v0.1.3'
+        run: 'ape pm install'
 
       - name: 'Compile contracts'
         run: 'ape compile --force'
