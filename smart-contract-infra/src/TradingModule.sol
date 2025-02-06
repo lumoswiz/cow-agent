@@ -3,11 +3,12 @@ pragma solidity 0.8.28;
 
 import { Enum } from "@gnosis.pm/safe-contracts/contracts/common/Enum.sol";
 import { Module } from "@gnosis-guild/zodiac/contracts/core/Module.sol";
+import { Guardable } from "@gnosis-guild/zodiac/contracts/guard/Guardable.sol";
 import { GPv2Order } from "cowprotocol/contracts/src/contracts/libraries/GPv2Order.sol";
 import { GPv2Signing } from "cowprotocol/contracts/src/contracts/mixins/GPv2Signing.sol";
 import { ITokenAllowlist } from "./interfaces/ITokenAllowlist.sol";
 
-abstract contract TradingModule is Module {
+abstract contract TradingModule is Module, Guardable {
     using GPv2Order for bytes;
 
     event SetOrderTradeable(
@@ -26,14 +27,14 @@ abstract contract TradingModule is Module {
     ITokenAllowlist internal allowlist;
     bytes32 internal domainSeparator;
 
-    constructor(address _owner, address _avatar, address _target, address _tokenAllowlist) {
-        bytes memory initParams = abi.encode(_owner, _avatar, _target, _tokenAllowlist);
+    constructor(address _owner, address _avatar, address _target, address _guard, address _tokenAllowlist) {
+        bytes memory initParams = abi.encode(_owner, _avatar, _target, _guard, _tokenAllowlist);
         setUp(initParams);
     }
 
     function setUp(bytes memory initParams) public override initializer {
-        (address _owner, address _avatar, address _target, address _tokenAllowlist) =
-            abi.decode(initParams, (address, address, address, address));
+        (address _owner, address _avatar, address _target, address _guard, address _tokenAllowlist) =
+            abi.decode(initParams, (address, address, address, address, address));
 
         require(_avatar != address(0));
         require(_target != address(0));
@@ -42,6 +43,8 @@ abstract contract TradingModule is Module {
 
         setAvatar(_avatar);
         setTarget(_target);
+        guard = _guard;
+
         allowlist = ITokenAllowlist(_tokenAllowlist);
         domainSeparator = GPv2Signing(GPV2_SETTLEMENT_ADDRESS).domainSeparator();
 
