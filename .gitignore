@@ -1,48 +1,44 @@
-# Silverback
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-.venv
-.pytest_cache/
+# Directories
 .build/
-.silverback*
-.ruff*
-
-# Bun
-node_modules/
-dist/
-*.tsbuildinfo
-coverage/
-.npm
-.eslintcache
-.yarn/
-.pnp.*
 .cache
+.db/
+.idea/
+.npm
+.nyc_output/
+.pytest_cache/
+.silverback*
+.venv
+.vscode/
+.yarn/
+abi/
+build/
+cache/
+coverage/
+dist/
+node_modules/
+out/
+wheels/
 
-# Logs
-logs/
+# Files
+*.egg-info
+*.env
+*.lcov
 *.log
+*.py[oc]
+*.tsbuildinfo
+.DS_Store
+.eslintcache
+.pnp.*
+.ruff*
+lcov.info
 npm-debug.log*
+package-lock.json
+pnpm-lock.yaml
 yarn-debug.log*
 yarn-error.log*
+yarn.lock
 
-# Environment
-.env
-.env.*
-
-# IDE/OS
-.vscode/
-.idea/
-.DS_Store
-
-# Project specific
-.db/
-abi/
-
-# Test coverage
-coverage/
-.nyc_output/
-*.lcov
+# Broadcasts
+!broadcast
+broadcast/*
+broadcast/*/31337/
