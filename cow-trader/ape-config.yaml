@@ -11,9 +11,12 @@ plugins:
     version: 0.8.5
 
 solidity:
-  version: 0.8.25
+  version: 0.8.27
 
 dependencies:
   - name: Solady
     github: Vectorized/solady
     ref: v0.1.3
+  - name: cowprotocol
+    github: cowprotocol/contracts
+    ref: main
