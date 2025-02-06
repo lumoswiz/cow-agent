@@ -6,6 +6,9 @@ import { Module } from "@gnosis-guild/zodiac/contracts/core/Module.sol";
 import { Guardable } from "@gnosis-guild/zodiac/contracts/guard/Guardable.sol";
 import { GPv2Order } from "cowprotocol/contracts/src/contracts/libraries/GPv2Order.sol";
 import { GPv2Signing } from "cowprotocol/contracts/src/contracts/mixins/GPv2Signing.sol";
+
+import { IAvatar } from "@gnosis-guild/zodiac/contracts/interfaces/IAvatar.sol";
+import { IGuard } from "@gnosis-guild/zodiac/contracts/interfaces/IGuard.sol";
 import { ITokenAllowlist } from "./interfaces/ITokenAllowlist.sol";
 
 abstract contract TradingModule is Module, Guardable {
@@ -65,5 +68,24 @@ abstract contract TradingModule is Module, Guardable {
         emit SetOrderTradeable(
             orderUid, address(order.sellToken), address(order.buyToken), order.sellAmount, order.buyAmount
         );
+    }
+
+    function exec(
+        address to,
+        uint256 value,
+        bytes memory data,
+        Enum.Operation operation
+    )
+        internal
+        override
+        returns (bool)
+    {
+        address currentGuard = guard;
+        if (currentGuard != address(0)) {
+            IGuard(currentGuard).checkTransaction(
+                to, value, data, operation, 0, 0, 0, address(0), payable(0), "", msg.sender
+            );
+        }
+        return IAvatar(target).execTransactionFromModule(to, value, data, operation);
     }
 }
