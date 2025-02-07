@@ -1,10 +1,7 @@
 [profile.default]
 auto_detect_solc = false
 block_timestamp = 1_738_368_000 # Feb 1, 2025 at 00:00 GMT
-bytecode_hash = "none"
-evm_version = "shanghai"
 fuzz = { runs = 1_000 }
-gas_reports = ["*"]
 optimizer = true
 optimizer_runs = 10_000
 out = "out"
@@ -31,9 +28,9 @@ tab_width = 4
 wrap_comments = true
 
 [rpc_endpoints]
-arbitrum = "https://arbitrum-one-rpc.publicnode.com"
-base = "https://mainnet.base.org"
-gnosis_chain = "https://rpc.gnosischain.com"
+arbitrum = "https://rpc.ankr.com/arbitrum"
+base = "https://rpc.ankr.com/base"
+gnosis = "https://rpc.ankr.com/gnosis"
 localhost = "http://localhost:8545"
-mainnet = "https://eth-mainnet.g.alchemy.com/v2/${API_KEY_ALCHEMY}"
-sepolia = "https://ethereum-sepolia-rpc.publicnode.com"
+mainnet = "https://rpc.ankr.com/eth"
+sepolia = "https://rpc2.sepolia.org"
