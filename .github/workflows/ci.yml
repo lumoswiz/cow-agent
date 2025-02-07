@@ -8,30 +8,6 @@ on:
       - 'main'
 
 jobs:
-  lint:
-    name: 'Smart Contract Infra Lint'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./smart-contract-infra
-    steps:
-      - name: 'Checkout the repo'
-        uses: actions/checkout@v4
-
-      - name: 'Install Bun'
-        uses: oven-sh/setup-bun@v1
-
-      - name: 'Install the node.js dependencies'
-        run: bun install
-
-      - name: 'Lint the code'
-        run: bun run lint
-
-      - name: 'Add lint summary'
-        run: |
-          echo "## Lint result" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
-
   trader-lint:
     name: 'CoW Trader Lint'
     runs-on: 'ubuntu-latest'
@@ -63,85 +39,82 @@ jobs:
           echo "## Lint result" >> $GITHUB_STEP_SUMMARY
           echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
 
-  trader-build:
-    name: 'CoW Trader Build'
+  contracts-lint:
+    name: 'Smart Contract Lint'
     runs-on: 'ubuntu-latest'
     defaults:
       run:
-        working-directory: './cow-trader'
+        working-directory: './smart-contract-infra'
     steps:
-      - name: 'Checkout the repo'
+      - name: 'Check out the repo'
         uses: 'actions/checkout@v4'
 
-      - name: 'Install UV'
-        uses: 'astral-sh/setup-uv@v5'
-        with:
-          version: '0.5.26'
+      - name: 'Install Foundry'
+        uses: 'foundry-rs/foundry-toolchain@v1'
 
-      - name: 'Setup Python'
-        uses: 'actions/setup-python@v5'
-        with:
-          python-version-file: './cow-trader/pyproject.toml'
+      - name: 'Install Bun'
+        uses: 'oven-sh/setup-bun@v1'
 
-      - name: 'Install dependencies'
-        run: 'uv sync --all-extras --dev'
+      - name: 'Install the Node.js dependencies'
+        run: 'bun install'
 
-      - name: 'Install Ape'
-        uses: 'ApeWorX/github-action@v3'
-        with:
-          python-version: '3.11'
-          ape-version-pin: '0.8.25'
-          ape-plugins-list: 'solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7'
+      - name: 'Lint the code'
+        run: 'bun run lint'
 
-      - name: 'Install contract dependencies'
-        run: 'ape pm install'
+      - name: 'Add lint summary'
+        run: |
+          echo "## Lint result" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
 
-      - name: 'Compile contracts'
-        run: 'ape compile --force'
+  contracts-build:
+    name: 'Smart Contract Build'
+    runs-on: 'ubuntu-latest'
+    defaults:
+      run:
+        working-directory: './smart-contract-infra'
+    steps:
+      - name: 'Check out the repo'
+        uses: 'actions/checkout@v4'
+
+      - name: 'Install Foundry'
+        uses: 'foundry-rs/foundry-toolchain@v1'
+
+      - name: 'Install Bun'
+        uses: 'oven-sh/setup-bun@v1'
+
+      - name: 'Install the Node.js dependencies'
+        run: 'bun install'
+
+      - name: 'Build the contracts and print their size'
+        run: 'forge build --sizes'
 
       - name: 'Add build summary'
         run: |
           echo "## Build result" >> $GITHUB_STEP_SUMMARY
           echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
 
-  trader-test:
-    name: 'CoW Trader Test'
-    needs: ['trader-lint', 'trader-build']
+  contracts-test:
+    name: 'Smart Contract Test'
+    needs: ['contracts-lint', 'contracts-build']
     runs-on: 'ubuntu-latest'
-    env:
-      UV_SYSTEM_PYTHON: 1
     defaults:
       run:
-        working-directory: './cow-trader'
+        working-directory: './smart-contract-infra'
     steps:
-      - name: 'Checkout the repo'
+      - name: 'Check out the repo'
         uses: 'actions/checkout@v4'
 
-      - name: 'Install UV'
-        uses: 'astral-sh/setup-uv@v5'
-        with:
-          version: '0.5.26'
+      - name: 'Install Foundry'
+        uses: 'foundry-rs/foundry-toolchain@v1'
 
-      - name: 'Setup Python'
-        uses: 'actions/setup-python@v5'
-        with:
-          python-version-file: './cow-trader/pyproject.toml'
+      - name: 'Install Bun'
+        uses: 'oven-sh/setup-bun@v1'
 
-      - name: 'Install dependencies'
-        run: 'uv sync --all-extras --dev'
+      - name: 'Install the Node.js dependencies'
+        run: 'bun install'
 
-      - name: 'Install Ape'
-        uses: 'ApeWorX/github-action@v3'
-        with:
-          python-version: '3.11'
-          ape-version-pin: '0.8.25'
-          ape-plugins-list: 'solidity==0.8.5 alchemy==0.8.7 etherscan==0.8.4 foundry==0.8.7'
-
-      - name: 'Install contract dependencies'
-        run: 'ape pm install'
-
-      - name: 'Run tests'
-        run: 'ape test -s'
+      - name: 'Run the tests'
+        run: 'forge test'
 
       - name: 'Add test summary'
         run: |
