@@ -8,7 +8,6 @@ out = "out"
 script = "script"
 solc = "0.8.28"
 src = "src"
-test = "tests"
 
 [profile.ci]
 fuzz = { runs = 10_000 }

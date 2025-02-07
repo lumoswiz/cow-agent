@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import { ITokenAllowlist } from "src/interfaces/ITokenAllowlist.sol";
 import { Enum } from "@gnosis.pm/safe-contracts/contracts/common/Enum.sol";
 import { BaseGuard } from "@gnosis-guild/zodiac/contracts/guard/BaseGuard.sol";
 
@@ -11,6 +12,9 @@ contract CoWSwapGuard is BaseGuard {
     /// @notice Thrown when the function selector is not `setPreSignature(bytes,bool)`
     error InvalidSelector();
 
+    /// @notice Thrown when either the buy or sell token for an order is not allowed
+    error OrderNotAllowed();
+
     /// @notice GPv2Settlement address
     /// @dev Deterministically deployed
     address internal constant GPV2_SETTLEMENT_ADDRESS = 0x9008D19f58AAbD9eD0D60971565AA8510560ab41;
@@ -18,6 +22,14 @@ contract CoWSwapGuard is BaseGuard {
     /// @notice Function selector for GPv2Settlement.setPreSignature
     bytes4 internal constant SET_PRE_SIGNATURE_SELECTOR = 0xec6cb13f;
 
+    /// @notice CoW DAO's governance controlled token allowlist contract
+    ITokenAllowlist internal immutable ALLOWLIST;
+
+    constructor(address _allowlist) {
+        ALLOWLIST = ITokenAllowlist(_allowlist);
+    }
+
+    /// @notice Checks the trade is on CoW Swap for allowed tokens and sets the pre-signed order tradeability
     /// @dev Module transactions only use the first four parameters: to, value, data, and operation.
     function checkTransaction(
         address to,
@@ -33,12 +45,19 @@ contract CoWSwapGuard is BaseGuard {
         address
     )
         external
-        pure
+        view
         override
     {
         require(to == GPV2_SETTLEMENT_ADDRESS, InvalidAddress());
 
-        (bytes4 selector,,) = abi.decode(data, (bytes4, bytes, bool));
+        (bytes memory txData, address sellToken, address buyToken) = abi.decode(data, (bytes, address, address));
+
+        require(ALLOWLIST.isOrderAllowed(sellToken, buyToken), OrderNotAllowed());
+
+        bytes32 selector;
+        assembly {
+            selector := mload(add(txData, 32))
+        }
         require(selector == SET_PRE_SIGNATURE_SELECTOR, InvalidSelector());
     }
 
