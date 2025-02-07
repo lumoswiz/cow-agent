@@ -1,0 +1,7 @@
+forge-std/=node_modules/forge-std/src/
+@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/
+@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/
+@gnosis.pm/safe-contracts/=node_modules/@gnosis.pm/safe-contracts/
+@gnosis-guild/zodiac/=node_modules/@gnosis-guild/zodiac/
+solady/=node_modules/solady/
+cowprotocol/=node_modules/cowprotocol/

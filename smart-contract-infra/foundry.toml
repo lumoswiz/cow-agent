@@ -1,0 +1,35 @@
+[profile.default]
+auto_detect_solc = false
+block_timestamp = 1_738_368_000 # Feb 1, 2025 at 00:00 GMT
+fuzz = { runs = 1_000 }
+optimizer = true
+optimizer_runs = 10_000
+out = "out"
+script = "script"
+solc = "0.8.28"
+src = "src"
+
+[profile.ci]
+fuzz = { runs = 10_000 }
+verbosity = 4
+
+[etherscan]
+mainnet = { key = "${API_KEY_ETHERSCAN}" }
+
+[fmt]
+bracket_spacing = true
+int_types = "long"
+line_length = 120
+multiline_func_header = "all"
+number_underscore = "thousands"
+quote_style = "double"
+tab_width = 4
+wrap_comments = true
+
+[rpc_endpoints]
+arbitrum = "https://rpc.ankr.com/arbitrum"
+base = "https://rpc.ankr.com/base"
+gnosis = "https://rpc.ankr.com/gnosis"
+localhost = "http://localhost:8545"
+mainnet = "https://rpc.ankr.com/eth"
+sepolia = "https://rpc2.sepolia.org"
