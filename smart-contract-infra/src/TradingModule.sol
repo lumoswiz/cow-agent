@@ -80,6 +80,8 @@ abstract contract TradingModule is Module, Guardable {
             to, value, data, operation, 0, 0, 0, address(0), payable(0), "", msg.sender
         );
 
-        return IAvatar(target).execTransactionFromModule(to, value, data, operation);
+        (bytes memory txData,,) = abi.decode(data, (bytes, address, address));
+
+        return IAvatar(target).execTransactionFromModule(to, value, txData, operation);
     }
 }
