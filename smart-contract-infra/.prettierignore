@@ -1,5 +1,11 @@
-node_modules
+# directories
+broadcast
+cache
 coverage
+node_modules
+out
+
+# files
 *.env
 *.log
 .DS_Store
@@ -7,5 +13,5 @@ coverage
 bun.lockb
 lcov.info
 package-lock.json
+pnpm-lock.yaml
 yarn.lock
-cow-trader/
