@@ -1,6 +1,6 @@
 [profile.default]
 auto_detect_solc = false
-block_timestamp = 1_738_368_000 # Feb 1, 2025 at 00:00 GMT
+block_timestamp = 1_738_368_000
 fuzz = { runs = 1_000 }
 optimizer = true
 optimizer_runs = 10_000
@@ -8,13 +8,11 @@ out = "out"
 script = "script"
 solc = "0.8.28"
 src = "src"
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
 [profile.ci]
 fuzz = { runs = 10_000 }
 verbosity = 4
-
-[etherscan]
-mainnet = { key = "${API_KEY_ETHERSCAN}" }
 
 [fmt]
 bracket_spacing = true
