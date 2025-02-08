@@ -10,6 +10,7 @@ import requests
 from ape import Contract, accounts, chain
 from ape.api import BlockAPI
 from ape.types import LogFilter
+from eth_abi import encode
 from silverback import SilverbackBot, StateSnapshot
 from taskiq import Context, TaskiqDepends
 
@@ -21,6 +22,7 @@ TRADE_FILEPATH = os.environ.get("TRADE_FILEPATH", ".db/trades.csv")
 BLOCK_FILEPATH = os.environ.get("BLOCK_FILEPATH", ".db/block.csv")
 GPV2_ABI_FILEPATH = os.environ.get("GPV2_ABI_FILEPATH", "./abi/GPv2Settlement.json")
 TOKEN_ALLOWLIST_FILEPATH = os.environ.get("TOKEN_ALLOWLIST_FILEPATH", "./abi/TokenAllowlist.json")
+ORDERS_FILEPATH = os.environ.get("ORDERS_FILEPATH", ".db/orders.csv")
 
 # Addresses
 SAFE_ADDRESS = "0x5aFE3855358E112B5647B952709E6165e1c1eEEe"  # PLACEHOLDER
@@ -30,7 +32,7 @@ GNO_ADDRESS = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW_ADDRESS = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
 
 
-# Load ABI helper function
+# ABI
 def _load_abi(abi_name: str) -> Dict:
     """Load ABI from json file"""
     abi_path = Path(os.environ.get(f"{abi_name}_ABI_FILEPATH", f"./abi/{abi_name}.json"))
@@ -41,6 +43,9 @@ def _load_abi(abi_name: str) -> Dict:
 # Contracts
 GPV2_SETTLEMENT_CONTRACT = Contract(GPV2_SETTLEMENT_ADDRESS, abi=_load_abi("GPv2Settlement"))
 TOKEN_ALLOWLIST_CONTRACt = Contract(TOKEN_ALLOWLIST_ADDRESS, abi=_load_abi("TokenAllowlist"))
+
+# ABI
+GPV2_ORDER_ABI = _load_abi("GPv2Order")
 
 # API
 API_BASE_URL = "https://api.cow.fi/xdai/api/v1"
@@ -96,6 +101,26 @@ def _save_block_db(data: Dict):
     os.makedirs(os.path.dirname(BLOCK_FILEPATH), exist_ok=True)
     df = pd.DataFrame([data])
     df.to_csv(BLOCK_FILEPATH, index=False)
+
+
+def _load_orders_db() -> pd.DataFrame:
+    """
+    Load orders database from CSV file or create new if doesn't exist
+    """
+    dtype = {"orderUid": str, "encodedOrder": str, "signed": bool}
+
+    df = (
+        pd.read_csv(ORDERS_FILEPATH, dtype=dtype)
+        if os.path.exists(ORDERS_FILEPATH)
+        else pd.DataFrame(columns=dtype.keys()).astype(dtype)
+    )
+    return df
+
+
+def _save_orders_db(df: pd.DataFrame) -> None:
+    """Save orders to CSV file"""
+    os.makedirs(os.path.dirname(ORDERS_FILEPATH), exist_ok=True)
+    df.to_csv(ORDERS_FILEPATH, index=False)
 
 
 # Historical log helper functions
@@ -229,6 +254,56 @@ def _submit_order(order_payload: Dict) -> str:
         raise Exception(f"Order request failed: {e}")
 
 
+def _save_order(order_uid: str, order_payload: Dict, signed: bool) -> None:
+    """
+    Save order to database
+    Encodes order parameters using eth_abi
+    """
+
+    types = [
+        "address",
+        "address",
+        "address",
+        "uint256",
+        "uint256",
+        "uint32",
+        "bytes32",
+        "uint256",
+        "string",
+        "bool",
+        "string",
+        "string",
+    ]
+
+    values = [
+        order_payload["sellToken"],
+        order_payload["buyToken"],
+        order_payload["receiver"],
+        int(order_payload["sellAmount"]),
+        int(order_payload["buyAmount"]),
+        order_payload["validTo"],
+        bytes.fromhex(order_payload["appDataHash"][2:]),
+        0,
+        order_payload["kind"],
+        order_payload["partiallyFillable"],
+        order_payload["sellTokenBalance"],
+        order_payload["buyTokenBalance"],
+    ]
+
+    encoded_order = encode(types, values)
+
+    df = _load_orders_db()
+
+    new_order = {
+        "orderUid": order_uid,
+        "encodedOrder": "0x" + encoded_order.hex(),
+        "signed": signed,
+    }
+    df = pd.concat([df, pd.DataFrame([new_order])], ignore_index=True)
+
+    _save_orders_db(df)
+
+
 def create_and_submit_order(
     sell_token: str,
     buy_token: str,
@@ -250,6 +325,9 @@ def create_and_submit_order(
 
         order_uid = _submit_order(order_payload)
         click.echo(f"Order response: {order_uid}")
+
+        _save_order(order_uid, order_payload, False)
+
         return order_uid, None
 
     except Exception as e:
