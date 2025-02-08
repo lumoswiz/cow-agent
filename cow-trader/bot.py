@@ -6,6 +6,7 @@ from typing import Annotated, Dict
 import click
 import numpy as np
 import pandas as pd
+import requests
 from ape import Contract, accounts, chain
 from ape.api import BlockAPI
 from ape.types import LogFilter
@@ -40,6 +41,10 @@ def _load_abi(abi_name: str) -> Dict:
 # Contracts
 GPV2_SETTLEMENT_CONTRACT = Contract(GPV2_SETTLEMENT_ADDRESS, abi=_load_abi("GPv2Settlement"))
 TOKEN_ALLOWLIST_CONTRACt = Contract(TOKEN_ALLOWLIST_ADDRESS, abi=_load_abi("TokenAllowlist"))
+
+# API
+API_BASE_URL = "https://api.cow.fi/xdai/api/v1"
+API_HEADERS = {"accept": "application/json", "Content-Type": "application/json"}
 
 # Variables
 START_BLOCK = int(os.environ.get("START_BLOCK", chain.blocks.head.number))
@@ -167,6 +172,16 @@ def _construct_quote_payload(
     }
 
 
+def _get_quote(payload: Dict) -> Dict:
+    """
+    Get quote from CoW API
+    Returns quote response or raises exception
+    """
+    response = requests.post(url=f"{API_BASE_URL}/quote", headers=API_HEADERS, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
 # Silverback bot
 @bot.on_startup()
 def app_startup(startup_state: StateSnapshot):
@@ -189,9 +204,11 @@ def app_startup(startup_state: StateSnapshot):
 def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
     """Execute block handler"""
     quote_payload = _construct_quote_payload(
-        sell_token=GNO_ADDRESS,
-        buy_token=COW_ADDRESS,
-        sell_amount="1000000000000000000",
+        sell_token=GNO_ADDRESS, buy_token=COW_ADDRESS, sell_amount="1000000000000000000"
     )
 
-    click.echo(f"Quote Payload: {quote_payload}")
+    try:
+        quote = _get_quote(quote_payload)
+        click.echo(f"Quote received: {quote}")
+    except requests.RequestException as e:
+        click.echo(f"Quote request failed: {e}")
