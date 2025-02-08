@@ -10,7 +10,7 @@ import { GPv2Signing } from "cowprotocol/contracts/src/contracts/mixins/GPv2Sign
 import { IAvatar } from "@gnosis-guild/zodiac/contracts/interfaces/IAvatar.sol";
 import { IGuard } from "@gnosis-guild/zodiac/contracts/interfaces/IGuard.sol";
 
-abstract contract TradingModule is Module, Guardable {
+contract TradingModule is Module, Guardable {
     using GPv2Order for bytes;
 
     /// @notice Emitted when an order was successfully set
