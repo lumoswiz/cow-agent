@@ -182,6 +182,43 @@ def _get_quote(payload: Dict) -> Dict:
     return response.json()
 
 
+def _construct_order_payload(quote_response: Dict) -> Dict:
+    """
+    Transform quote response into order request payload
+    """
+    quote = quote_response["quote"]
+
+    return {
+        "sellToken": quote["sellToken"],
+        "buyToken": quote["buyToken"],
+        "receiver": quote["receiver"],
+        "sellAmount": quote["sellAmount"],
+        "buyAmount": quote["buyAmount"],
+        "validTo": quote["validTo"],
+        "feeAmount": quote["feeAmount"],
+        "kind": quote["kind"],
+        "partiallyFillable": quote["partiallyFillable"],
+        "sellTokenBalance": quote["sellTokenBalance"],
+        "buyTokenBalance": quote["buyTokenBalance"],
+        "signingScheme": "presign",
+        "signature": "0x",
+        "from": quote_response["from"],
+        "quoteId": quote_response["id"],
+        "appData": quote["appData"],
+        "appDataHash": quote["appDataHash"],
+    }
+
+
+def _submit_order(order_payload: Dict) -> Dict:
+    """
+    Submit order to CoW API
+    Returns order response or raises exception
+    """
+    response = requests.post(url=f"{API_BASE_URL}/orders", headers=API_HEADERS, json=order_payload)
+    response.raise_for_status()
+    return response.json()
+
+
 # Silverback bot
 @bot.on_startup()
 def app_startup(startup_state: StateSnapshot):
