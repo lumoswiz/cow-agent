@@ -195,7 +195,7 @@ def _construct_order_payload(quote_response: Dict) -> Dict:
         "sellAmount": quote["sellAmount"],
         "buyAmount": quote["buyAmount"],
         "validTo": quote["validTo"],
-        "feeAmount": quote["feeAmount"],
+        "feeAmount": "0",
         "kind": quote["kind"],
         "partiallyFillable": quote["partiallyFillable"],
         "sellTokenBalance": quote["sellTokenBalance"],
@@ -209,14 +209,51 @@ def _construct_order_payload(quote_response: Dict) -> Dict:
     }
 
 
-def _submit_order(order_payload: Dict) -> Dict:
+def _submit_order(order_payload: Dict) -> str:
     """
     Submit order to CoW API
-    Returns order response or raises exception
+    Returns order UID string or raises exception
     """
-    response = requests.post(url=f"{API_BASE_URL}/orders", headers=API_HEADERS, json=order_payload)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = requests.post(
+            url=f"{API_BASE_URL}/orders", headers=API_HEADERS, json=order_payload
+        )
+        response.raise_for_status()
+        return response.text.strip('"')
+    except requests.RequestException as e:
+        if e.response is not None:
+            error_data = e.response.json()
+            error_type = error_data.get("errorType", "Unknown")
+            error_description = error_data.get("description", str(e))
+            raise Exception(f"{error_type} - {error_description}")
+        raise Exception(f"Order request failed: {e}")
+
+
+def create_and_submit_order(
+    sell_token: str,
+    buy_token: str,
+    sell_amount: str,
+) -> tuple[str | None, str | None]:
+    """
+    Create and submit order to CoW API
+    Returns (order_uid, error_message)
+    """
+    try:
+        quote_payload = _construct_quote_payload(
+            sell_token=sell_token, buy_token=buy_token, sell_amount=sell_amount
+        )
+        quote = _get_quote(quote_payload)
+        click.echo(f"Quote received: {quote}")
+
+        order_payload = _construct_order_payload(quote)
+        click.echo(f"Submitting order payload: {order_payload}")
+
+        order_uid = _submit_order(order_payload)
+        click.echo(f"Order response: {order_uid}")
+        return order_uid, None
+
+    except Exception as e:
+        return None, str(e)
 
 
 # Silverback bot
@@ -240,12 +277,11 @@ def app_startup(startup_state: StateSnapshot):
 @bot.on_(chain.blocks)
 def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
     """Execute block handler"""
-    quote_payload = _construct_quote_payload(
-        sell_token=GNO_ADDRESS, buy_token=COW_ADDRESS, sell_amount="1000000000000000000"
+    order_uid, error = create_and_submit_order(
+        sell_token=GNO_ADDRESS, buy_token=COW_ADDRESS, sell_amount="20000000000000000000"
     )
 
-    try:
-        quote = _get_quote(quote_payload)
-        click.echo(f"Quote received: {quote}")
-    except requests.RequestException as e:
-        click.echo(f"Quote request failed: {e}")
+    if error:
+        click.echo(f"Order failed: {error}")
+    else:
+        click.echo(f"Order submitted successfully. UID: {order_uid}")
