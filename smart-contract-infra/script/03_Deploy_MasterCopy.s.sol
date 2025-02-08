@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import { console2 } from "forge-std/Script.sol";
+import { ScriptUtils } from "script/ScriptUtils.sol";
+import { TradingModule } from "src/TradingModule.sol";
+
+interface ISingletonFactory {
+    function deploy(bytes memory, bytes32) external returns (address payable createdContract);
+}
+
+// With verification:
+/*
+    forge script script/03_Deploy_MasterCopy.s.sol \
+    --rpc-url gnosis \
+    --private-key $PRIVATE_KEY \
+    --verify --etherscan-api-key $ETHERSCAN_API_KEY \
+    --broadcast -vvvv
+*/
+
+// Without verification:
+/*
+    forge script script/03_Deploy_MasterCopy.s.sol \
+    --rpc-url gnosis \
+    --private-key $PRIVATE_KEY \
+    --broadcast -vvvv
+*/
+
+contract DeployMasterCopy is ScriptUtils {
+    address internal constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    address internal constant ZERO_ADDRESS = address(0);
+
+    function run() external {
+        uint256 pk = vm.envUint("PRIVATE_KEY");
+
+        bytes memory creationCode = type(TradingModule).creationCode;
+        bytes memory constructorArgs = abi.encode(ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS);
+        bytes memory initCode = abi.encodePacked(creationCode, constructorArgs);
+
+        bytes32 salt = keccak256(abi.encodePacked("TradingModuleV1"));
+
+        vm.startBroadcast(pk);
+
+        ISingletonFactory factory = ISingletonFactory(SINGLETON_FACTORY);
+        address tradingModuleMasterCopy = factory.deploy(initCode, salt);
+
+        console2.log("TradingModule MasterCopy deployed to:", tradingModuleMasterCopy);
+        _writeDeploymentAddress(tradingModuleMasterCopy, ".tradingModuleMasterCopy");
+
+        vm.stopBroadcast();
+    }
+}
