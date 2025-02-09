@@ -1,10 +1,9 @@
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Dict
+from typing import Annotated, Dict, List
 
 import click
-import numpy as np
 import pandas as pd
 import requests
 from ape import Contract, accounts, chain
@@ -57,21 +56,20 @@ API_HEADERS = {"accept": "application/json", "Content-Type": "application/json"}
 
 # Variables
 START_BLOCK = int(os.environ.get("START_BLOCK", chain.blocks.head.number))
+HISTORICAL_BLOCK_STEP = int(os.environ.get("HISTORICAL_BLOCK_STEP", 720))
+EXTENSION_INTERVAL = int(os.environ.get("EXTENSION_INTERVAL", 6))
 
 
 # Local storage helper functions
-def _load_trades_db() -> Dict:
-    """
-    Load trades database from CSV file or create new if doesn't exist.
-    Returns dict with trade data indexed by block number.
-    """
+def _load_trades_db() -> pd.DataFrame:
+    """Load trades database from CSV file or create new if doesn't exist"""
     dtype = {
+        "block_number": int,
         "owner": str,
         "sellToken": str,
         "buyToken": str,
-        "sellAmount": object,
-        "buyAmount": object,
-        "block_number": np.int64,
+        "sellAmount": str,
+        "buyAmount": str,
     }
 
     df = (
@@ -79,7 +77,7 @@ def _load_trades_db() -> Dict:
         if os.path.exists(TRADE_FILEPATH)
         else pd.DataFrame(columns=dtype.keys()).astype(dtype)
     )
-    return df.to_dict("records")
+    return df
 
 
 def _save_trades_db(trades_dict: Dict) -> None:
@@ -167,15 +165,44 @@ def _get_historical_trades(
             yield log
 
 
-def _process_historical_trades(settlement_contract, start_block: int, stop_block: int) -> Dict:
+def _process_historical_trades(
+    settlement_contract, start_block: int, stop_block: int
+) -> List[Dict]:
     """Process historical trades and store in database"""
-    trades_db = _load_trades_db()
+    trades = []
 
     for log in _get_historical_trades(settlement_contract, start_block, stop_block):
-        trades_db.append(_process_trade_log(log))
+        trades.append(_process_trade_log(log))
 
-    _save_trades_db(trades_db)
-    return trades_db
+    if trades:
+        existing_trades = _load_trades_db()
+        all_trades = pd.concat([existing_trades, pd.DataFrame(trades)], ignore_index=True)
+
+        _save_trades_db(all_trades)
+
+    return trades
+
+
+def extend_historical_trades() -> None:
+    """Extend trades.csv data further back in history"""
+    trades_df = _load_trades_db()
+
+    if len(trades_df) == 0:
+        oldest_block = chain.blocks.head.number
+    else:
+        oldest_block = trades_df["block_number"].min()
+
+    new_trades = _process_historical_trades(
+        GPV2_SETTLEMENT_CONTRACT,
+        start_block=oldest_block - HISTORICAL_BLOCK_STEP,
+        stop_block=oldest_block - 1,
+    )
+
+    new_trades_df = pd.DataFrame(new_trades)
+    all_trades = pd.concat([new_trades_df, trades_df])
+    all_trades = all_trades.sort_values("block_number", ascending=True)
+
+    _save_trades_db(all_trades)
 
 
 # CoW Swap trading helper functions
@@ -313,7 +340,8 @@ def create_and_submit_order(
 
 # Silverback bot
 @bot.on_startup()
-def app_startup(startup_state: StateSnapshot):
+def bot_startup(startup_state: StateSnapshot):
+    """Initialize bot state and historical data"""
     block_db = _load_block_db()
     last_processed_block = block_db["last_processed_block"]
 
@@ -324,13 +352,17 @@ def app_startup(startup_state: StateSnapshot):
     )
 
     _save_block_db({"last_processed_block": chain.blocks.head.number})
-
+    bot.state.last_extension_block = chain.blocks.head.number
     return {"message": "Starting...", "block_number": startup_state.last_block_seen}
 
 
 @bot.on_(chain.blocks)
 def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
-    pass
+    _save_block_db({"last_processed_block": block.number})
+
+    if block.number - bot.state.last_extension_block >= EXTENSION_INTERVAL:
+        extend_historical_trades()
+        bot.state.last_extension_block = block.number
 
 
 #    """Execute block handler"""
