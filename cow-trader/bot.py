@@ -10,7 +10,6 @@ import requests
 from ape import Contract, accounts, chain
 from ape.api import BlockAPI
 from ape.types import LogFilter
-from eth_abi import encode
 from silverback import SilverbackBot, StateSnapshot
 from taskiq import Context, TaskiqDepends
 
@@ -107,7 +106,16 @@ def _load_orders_db() -> pd.DataFrame:
     """
     Load orders database from CSV file or create new if doesn't exist
     """
-    dtype = {"orderUid": str, "encodedOrder": str, "signed": bool}
+    dtype = {
+        "orderUid": str,
+        "signed": bool,
+        "sellToken": str,
+        "buyToken": str,
+        "receiver": str,
+        "sellAmount": str,
+        "buyAmount": str,
+        "validTo": int,
+    }
 
     df = (
         pd.read_csv(ORDERS_FILEPATH, dtype=dtype)
@@ -255,52 +263,21 @@ def _submit_order(order_payload: Dict) -> str:
 
 
 def _save_order(order_uid: str, order_payload: Dict, signed: bool) -> None:
-    """
-    Save order to database
-    Encodes order parameters using eth_abi
-    """
-
-    types = [
-        "address",
-        "address",
-        "address",
-        "uint256",
-        "uint256",
-        "uint32",
-        "bytes32",
-        "uint256",
-        "string",
-        "bool",
-        "string",
-        "string",
-    ]
-
-    values = [
-        order_payload["sellToken"],
-        order_payload["buyToken"],
-        order_payload["receiver"],
-        int(order_payload["sellAmount"]),
-        int(order_payload["buyAmount"]),
-        order_payload["validTo"],
-        bytes.fromhex(order_payload["appDataHash"][2:]),
-        0,
-        order_payload["kind"],
-        order_payload["partiallyFillable"],
-        order_payload["sellTokenBalance"],
-        order_payload["buyTokenBalance"],
-    ]
-
-    encoded_order = encode(types, values)
-
+    """Save order to database with individual fields"""
     df = _load_orders_db()
 
     new_order = {
         "orderUid": order_uid,
-        "encodedOrder": "0x" + encoded_order.hex(),
         "signed": signed,
+        "sellToken": order_payload["sellToken"],
+        "buyToken": order_payload["buyToken"],
+        "receiver": order_payload["receiver"],
+        "sellAmount": order_payload["sellAmount"],
+        "buyAmount": order_payload["buyAmount"],
+        "validTo": order_payload["validTo"],
     }
-    df = pd.concat([df, pd.DataFrame([new_order])], ignore_index=True)
 
+    df = pd.concat([df, pd.DataFrame([new_order])], ignore_index=True)
     _save_orders_db(df)
 
 
