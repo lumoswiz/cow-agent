@@ -29,7 +29,7 @@ GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
 GNO = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
 WETH = "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"
-SAFE = "0x5aFE3855358E112B5647B952709E6165e1c1eEEe"
+SAFE = "0x4d18815D14fe5c3304e87B3FA18318baa5c23820"
 WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
 
 MONITORED_TOKENS = [GNO, COW, WETH, SAFE, WXDAI]
@@ -135,8 +135,24 @@ def _save_orders_db(df: pd.DataFrame) -> None:
 
 
 # Historical log helper functions
+def get_canonical_pair(token_a: str, token_b: str) -> tuple[str, str]:
+    """Return tokens in canonical order (alphabetically by address)"""
+    return (token_a, token_b) if token_a.lower() < token_b.lower() else (token_b, token_a)
+
+
+def calculate_price(sell_amount: str, buy_amount: str) -> float:
+    """Calculate price from amounts"""
+    return int(sell_amount) / int(buy_amount)
+
+
 def _process_trade_log(log) -> Dict:
-    """Process trade log and return formatted dictionary entry"""
+    """Process trade log with price calculation"""
+    token_a, token_b = get_canonical_pair(log.sellToken, log.buyToken)
+    price = calculate_price(log.sellAmount, log.buyAmount)
+
+    if token_a != log.sellToken:
+        price = 1 / price
+
     return {
         "block_number": log.block_number,
         "owner": log.owner,
@@ -144,6 +160,9 @@ def _process_trade_log(log) -> Dict:
         "buyToken": log.buyToken,
         "sellAmount": str(log.sellAmount),
         "buyAmount": str(log.buyAmount),
+        "token_a": token_a,
+        "token_b": token_b,
+        "price": price,
     }
 
 
