@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Dict, List
 
@@ -9,6 +11,7 @@ import requests
 from ape import Contract, accounts, chain
 from ape.api import BlockAPI
 from ape.types import LogFilter
+from pydantic_ai import Agent, RunContext
 from silverback import SilverbackBot, StateSnapshot
 from taskiq import Context, TaskiqDepends
 
@@ -58,6 +61,36 @@ API_HEADERS = {"accept": "application/json", "Content-Type": "application/json"}
 START_BLOCK = int(os.environ.get("START_BLOCK", chain.blocks.head.number))
 HISTORICAL_BLOCK_STEP = int(os.environ.get("HISTORICAL_BLOCK_STEP", 720))
 EXTENSION_INTERVAL = int(os.environ.get("EXTENSION_INTERVAL", 6))
+
+
+@dataclass
+class TradeContext:
+    """Trading context for price monitoring"""
+
+    trades_df: pd.DataFrame
+
+
+trading_agent = Agent(
+    "anthropic:claude-3-sonnet-20240229",
+    deps_type=TradeContext,
+    system_prompt="I am a trading assistant monitoring CoW Swap prices.",
+)
+
+
+@trading_agent.system_prompt
+async def get_latest_prices(ctx: RunContext[TradeContext]) -> str:
+    """Get latest prices for monitored token pairs"""
+    df = ctx.deps.trades_df
+    pairs_df = df[["token_a", "token_b"]].drop_duplicates()
+
+    latest_prices = []
+    for _, pair in pairs_df.iterrows():
+        pair_trades = df[(df.token_a == pair.token_a) & (df.token_b == pair.token_b)]
+        if not pair_trades.empty:
+            latest = pair_trades.loc[pair_trades.block_number.idxmax()]
+            latest_prices.append(f"Price {latest.token_a}/{latest.token_b}: {latest.price}")
+
+    return "Latest market prices:\n" + "\n".join(latest_prices)
 
 
 # Local storage helper functions
@@ -372,6 +405,7 @@ def bot_startup(startup_state: StateSnapshot):
 
     _save_block_db({"last_processed_block": chain.blocks.head.number})
     bot.state.last_extension_block = chain.blocks.head.number
+    bot.state.agent = trading_agent
     return {"message": "Starting...", "block_number": startup_state.last_block_seen}
 
 
@@ -382,6 +416,16 @@ def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
     if block.number - bot.state.last_extension_block >= EXTENSION_INTERVAL:
         extend_historical_trades()
         bot.state.last_extension_block = block.number
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        trade_ctx = TradeContext(trades_df=_load_trades_db())
+
+        result = bot.state.agent.run_sync(
+            "What are the most recent prices for all monitored trading pairs?", deps=trade_ctx
+        )
+        click.echo(f"Latest price: {result.data}")
 
 
 #    """Execute block handler"""
