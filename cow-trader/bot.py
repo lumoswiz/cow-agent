@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Dict, List
 
@@ -63,7 +62,6 @@ EXTENSION_INTERVAL = int(os.environ.get("EXTENSION_INTERVAL", 6))
 
 
 # Agents
-@dataclass
 class TradeMetrics(BaseModel):
     token_a: str
     token_b: str
@@ -125,13 +123,14 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
     return metrics_list
 
 
-class TradeContext:
+class TradeContext(BaseModel):
     """Context for agent analysis"""
 
     trades_df: pd.DataFrame
     current_block: int
     token_balances: Dict[str, int]
     metrics: List[TradeMetrics]
+    prior_decisions: pd.DataFrame
     lookback_blocks: int = 15000
 
 
@@ -144,16 +143,38 @@ class AgentResponse(BaseModel):
     reasoning: str
 
 
+class AgentDecision(BaseModel):
+    """Complete trading decision with context and outcome"""
+
+    block_number: int
+    should_trade: bool
+    sell_token: str | None = None
+    buy_token: str | None = None
+    reasoning: str
+
+    trade_context: TradeContext
+
+    final_price: float | None = None
+    profitable: bool | None = None
+
+
 trading_agent = Agent(
     "anthropic:claude-3-sonnet-20240229",
     deps_type=TradeContext,
     result_type=AgentResponse,
     system_prompt="""You are a trading assistant monitoring CoW Swap prices.
-    Analyze market conditions and decide if we should trade.
-    If trading, specify which token to sell and which to buy.
-    Always explain your reasoning.
     
-    Note: Only suggest trading tokens that we own (check token_balances).
+    Before making a decision:
+    1. Review prior_decisions in the TradeContext to see:
+       - What trades worked (profitable=True)
+       - What trades failed (profitable=False)
+       - Recent price trends from metrics_snapshot
+    
+    Then analyze current market conditions and decide:
+    - Should we trade? (should_trade)
+    - If yes, which token to sell and buy (from tokens we own in token_balances)
+    
+    Always explain your reasoning, referencing both current metrics and past decisions.
     """,
 )
 
@@ -181,12 +202,13 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
         current_block=chain.blocks.head.number,
         token_balances=_get_token_balances(),
         metrics=compute_metrics(_load_trades_db(), lookback_blocks),
+        prior_decisions=_load_decisions_db(),
         lookback_blocks=lookback_blocks,
     )
 
 
 def _save_decision(
-    block_number: int, response: AgentResponse, metrics: List[TradeMetrics]
+    block_number: int, response: AgentResponse, trade_context: TradeContext
 ) -> pd.DataFrame:
     """Add new decision to decisions database"""
     decisions_df = _load_decisions_db()
@@ -197,12 +219,45 @@ def _save_decision(
         "sell_token": response.sell_token,
         "buy_token": response.buy_token,
         "reasoning": response.reasoning,
-        "metrics_snapshot": json.dumps([m.dict() for m in metrics]),
+        "metrics_snapshot": json.dumps([m.dict() for m in trade_context.metrics]),
+        "final_price": None,
+        "profitable": None,
     }
 
     decisions_df = pd.concat([decisions_df, pd.DataFrame([new_decision])], ignore_index=True)
-
     _save_decisions_db(decisions_df)
+    return decisions_df
+
+
+def _update_latest_decision_outcome(final_price: float) -> pd.DataFrame:
+    """Update most recent decision with outcome data"""
+    decisions_df = _load_decisions_db()
+
+    if decisions_df.empty:
+        return decisions_df
+
+    latest_idx = decisions_df.index[-1]
+    latest_decision = decisions_df.iloc[-1]
+
+    if latest_decision.should_trade:
+        metrics = json.loads(latest_decision.metrics_snapshot)
+        initial_price = next(
+            m["last_price"]
+            for m in metrics
+            if m["token_a"] == latest_decision.sell_token
+            and m["token_b"] == latest_decision.buy_token
+        )
+
+        profitable = (
+            final_price > initial_price
+            if latest_decision.sell_token == metrics[0]["token_a"]
+            else final_price < initial_price
+        )
+
+        decisions_df.loc[latest_idx, "final_price"] = final_price
+        decisions_df.loc[latest_idx, "profitable"] = profitable
+        _save_decisions_db(decisions_df)
+
     return decisions_df
 
 
