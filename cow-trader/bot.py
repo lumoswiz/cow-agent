@@ -24,6 +24,7 @@ TRADE_FILEPATH = os.environ.get("TRADE_FILEPATH", ".db/trades.csv")
 BLOCK_FILEPATH = os.environ.get("BLOCK_FILEPATH", ".db/block.csv")
 ORDERS_FILEPATH = os.environ.get("ORDERS_FILEPATH", ".db/orders.csv")
 DECISIONS_FILEPATH = os.environ.get("DECISIONS_FILEPATH", ".db/decisions.csv")
+REASONING_FILEPATH = os.environ.get("REASONING_FILEPATH", ".db/reasoning.csv")
 
 # Addresses
 SAFE_ADDRESS = "0x5aFE3855358E112B5647B952709E6165e1c1eEEe"  # PLACEHOLDER
@@ -59,6 +60,8 @@ API_HEADERS = {"accept": "application/json", "Content-Type": "application/json"}
 START_BLOCK = int(os.environ.get("START_BLOCK", chain.blocks.head.number))
 HISTORICAL_BLOCK_STEP = int(os.environ.get("HISTORICAL_BLOCK_STEP", 720))
 EXTENSION_INTERVAL = int(os.environ.get("EXTENSION_INTERVAL", 6))
+TRADING_BLOCK_COOLDOWN = int(os.environ.get("TRADING_BLOCK_COOLDOWN", 360))
+SYSTEM_PROMPT = Path("./system_prompt.txt").read_text().strip()
 
 
 # Agents
@@ -68,11 +71,8 @@ class TradeMetrics(BaseModel):
     last_price: float
     min_price: float
     max_price: float
-    mean_price: float
-    std_price: float
     volume_buy: float
     volume_sell: float
-    pressure_ratio: float
     order_imbalance: float
     trade_count: int
 
@@ -100,7 +100,6 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
         volume_buy = pair_df.buyAmount.astype(float).sum()
         volume_sell = pair_df.sellAmount.astype(float).sum()
 
-        pressure_ratio = volume_buy / volume_sell if volume_sell != 0 else float("inf")
         volume_sum = volume_buy + volume_sell
         order_imbalance = ((volume_buy - volume_sell) / volume_sum) if volume_sum != 0 else 0
 
@@ -110,11 +109,8 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
             last_price=pair_df.price.iloc[-1],
             min_price=pair_df.price.min(),
             max_price=pair_df.price.max(),
-            mean_price=pair_df.price.mean(),
-            std_price=pair_df.price.std(),
             volume_buy=volume_buy,
             volume_sell=volume_sell,
-            pressure_ratio=pressure_ratio,
             order_imbalance=order_imbalance,
             trade_count=len(pair_df),
         )
@@ -126,12 +122,12 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
 class TradeContext(BaseModel):
     """Context for agent analysis"""
 
-    trades_df: pd.DataFrame
-    current_block: int
     token_balances: Dict[str, int]
     metrics: List[TradeMetrics]
-    prior_decisions: pd.DataFrame
+    prior_decisions: List[Dict]
     lookback_blocks: int = 15000
+
+    # model_config = {"arbitrary_types_allowed": True}
 
 
 class AgentResponse(BaseModel):
@@ -144,17 +140,13 @@ class AgentResponse(BaseModel):
 
 
 class AgentDecision(BaseModel):
-    """Complete trading decision with context and outcome"""
+    """Trading decision with metrics snapshot"""
 
     block_number: int
     should_trade: bool
     sell_token: str | None = None
     buy_token: str | None = None
-    reasoning: str
-
-    trade_context: TradeContext
-
-    final_price: float | None = None
+    metrics_snapshot: List[TradeMetrics]
     profitable: bool | None = None
 
 
@@ -162,28 +154,27 @@ trading_agent = Agent(
     "anthropic:claude-3-sonnet-20240229",
     deps_type=TradeContext,
     result_type=AgentResponse,
-    system_prompt="""You are a trading assistant monitoring CoW Swap prices.
-    
-    Before making a decision:
-    1. Review prior_decisions in the TradeContext to see:
-       - What trades worked (profitable=True)
-       - What trades failed (profitable=False)
-       - Recent price trends from metrics_snapshot
-    
-    Then analyze current market conditions and decide:
-    - Should we trade? (should_trade)
-    - If yes, which token to sell and buy (from tokens we own in token_balances)
-    
-    Always explain your reasoning, referencing both current metrics and past decisions.
-    """,
+    system_prompt=SYSTEM_PROMPT,
 )
+
+TOKEN_NAMES = {
+    "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb": "GNO",
+    "0x177127622c4A00F3d409B75571e12cB3c8973d3c": "COW",
+    "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1": "WETH",
+    "0x4d18815D14fe5c3304e87B3FA18318baa5c23820": "SAFE",
+    "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d": "WXDAI",
+}
+
+
+@trading_agent.tool_plain
+def get_token_name(address: str) -> str:
+    """Get human readable token name from contract address"""
+    return TOKEN_NAMES.get(address, address)
 
 
 def _get_token_balances() -> Dict[str, int]:
     """Get balances of monitored tokens using multicall"""
-    token_contracts = [
-        Contract(token_address, abi=_load_abi("IERC20")) for token_address in MONITORED_TOKENS
-    ]
+    token_contracts = [Contract(token_address) for token_address in MONITORED_TOKENS]
 
     call = multicall.Call()
     for contract in token_contracts:
@@ -197,30 +188,33 @@ def _get_token_balances() -> Dict[str, int]:
 @trading_agent.tool_plain
 def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     """Create TradeContext with all required data"""
+    trades_df = _load_trades_db()
+    decisions_df = _load_decisions_db()
+
     return TradeContext(
-        trades_df=_load_trades_db(),
-        current_block=chain.blocks.head.number,
         token_balances=_get_token_balances(),
-        metrics=compute_metrics(_load_trades_db(), lookback_blocks),
-        prior_decisions=_load_decisions_db(),
+        metrics=compute_metrics(trades_df, lookback_blocks),
+        prior_decisions=decisions_df.tail(10).to_dict("records"),
         lookback_blocks=lookback_blocks,
     )
 
 
 def _save_decision(
-    block_number: int, response: AgentResponse, trade_context: TradeContext
+    block_number: int, response: AgentResponse, metrics: List[TradeMetrics]
 ) -> pd.DataFrame:
     """Add new decision to decisions database"""
     decisions_df = _load_decisions_db()
 
+    # Save reasoning separately
+    _save_reasoning(block_number, response.reasoning)
+
+    # Save decision with metrics snapshot
     new_decision = {
         "block_number": block_number,
         "should_trade": response.should_trade,
         "sell_token": response.sell_token,
         "buy_token": response.buy_token,
-        "reasoning": response.reasoning,
-        "metrics_snapshot": json.dumps([m.dict() for m in trade_context.metrics]),
-        "final_price": None,
+        "metrics_snapshot": json.dumps([m.dict() for m in metrics]),
         "profitable": None,
     }
 
@@ -254,11 +248,20 @@ def _update_latest_decision_outcome(final_price: float) -> pd.DataFrame:
             else final_price < initial_price
         )
 
-        decisions_df.loc[latest_idx, "final_price"] = final_price
         decisions_df.loc[latest_idx, "profitable"] = profitable
         _save_decisions_db(decisions_df)
 
     return decisions_df
+
+
+def _save_reasoning(block_number: int, reasoning: str) -> None:
+    """Save agent reasoning to JSON file"""
+    os.makedirs(os.path.dirname(REASONING_FILEPATH), exist_ok=True)
+
+    entry = {"block_number": block_number, "reasoning": reasoning}
+
+    with open(REASONING_FILEPATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
 # Local storage helper functions
@@ -604,21 +607,48 @@ def bot_startup(startup_state: StateSnapshot):
 
 @bot.on_(chain.blocks)
 def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
+    """Execute block handler"""
     _save_block_db({"last_processed_block": block.number})
 
-    if block.number - bot.state.last_extension_block >= EXTENSION_INTERVAL:
-        extend_historical_trades()
-        bot.state.last_extension_block = block.number
+    # Load decisions once
+    decisions_df = _load_decisions_db()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    # Early return if no cooldown or no previous decisions
+    if decisions_df.empty:
+        should_trade = True
+        latest_decision = None
+    else:
+        latest_decision = decisions_df.iloc[-1]
+        should_trade = block.number - latest_decision.block_number >= TRADING_BLOCK_COOLDOWN
 
-        trade_ctx = TradeContext(trades_df=_load_trades_db())
+    if not should_trade:
+        return
 
-        result = bot.state.agent.run_sync(
-            "What are the most recent prices for all monitored trading pairs?", deps=trade_ctx
+    # Create trade context
+    trade_ctx = create_trade_context()
+
+    # Update previous decision outcome if it exists and was a trade
+    if latest_decision is not None and latest_decision.should_trade:
+        _update_latest_decision_outcome(
+            final_price=next(
+                m.last_price
+                for m in trade_ctx.metrics
+                if m.token_a == latest_decision.sell_token
+                and m.token_b == latest_decision.buy_token
+            )
         )
-        click.echo(f"Latest price: {result.data}")
+
+    # Setup async loop for agent
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # Run agent
+    result = bot.state.agent.run_sync(
+        "Analyze current market conditions and make a trading decision", deps=trade_ctx
+    )
+
+    # Save new decision with metrics
+    _save_decision(block_number=block.number, response=result.data, metrics=trade_ctx.metrics)
 
 
 #    """Execute block handler"""
