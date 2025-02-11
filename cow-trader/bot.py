@@ -11,6 +11,7 @@ import requests
 from ape import Contract, accounts, chain
 from ape.api import BlockAPI
 from ape.types import LogFilter
+from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from silverback import SilverbackBot, StateSnapshot
 from taskiq import Context, TaskiqDepends
@@ -29,11 +30,14 @@ ORDERS_FILEPATH = os.environ.get("ORDERS_FILEPATH", ".db/orders.csv")
 SAFE_ADDRESS = "0x5aFE3855358E112B5647B952709E6165e1c1eEEe"  # PLACEHOLDER
 TOKEN_ALLOWLIST_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
 GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+
 GNO = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
 WETH = "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"
 SAFE = "0x4d18815D14fe5c3304e87B3FA18318baa5c23820"
 WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
+
+TOKEN_NAMES = {GNO: "GNO", COW: "COW", WETH: "WETH", SAFE: "SAFE", WXDAI: "WXDAI"}
 
 MONITORED_TOKENS = [GNO, COW, WETH, SAFE, WXDAI]
 
@@ -255,6 +259,69 @@ def extend_historical_trades() -> None:
     all_trades = all_trades.sort_values("block_number", ascending=True)
 
     _save_trades_db(all_trades)
+
+
+# Trade metrics
+class TradeMetrics(BaseModel):
+    token_a: str
+    token_b: str
+    last_price: float
+    min_price: float
+    max_price: float
+    mean_price: float
+    std_price: float
+    volume_buy: float
+    volume_sell: float
+    pressure_ratio: float
+    order_imbalance: float
+    trade_count: int
+
+
+def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
+    """Compute trading metrics for all token pairs in filtered DataFrame"""
+    if df.empty:
+        return []
+
+    latest_block = df.block_number.max()
+    filtered_df = df[df.block_number >= (latest_block - lookback_blocks)]
+
+    if filtered_df.empty:
+        return []
+
+    # Get unique token pairs
+    pairs_df = filtered_df[["token_a", "token_b"]].drop_duplicates()
+    metrics_list = []
+
+    for _, pair in pairs_df.iterrows():
+        pair_df = filtered_df[
+            (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
+        ]
+
+        volume_buy = pair_df.buyAmount.astype(float).sum()
+        volume_sell = pair_df.sellAmount.astype(float).sum()
+
+        # Avoid division by zero
+        pressure_ratio = volume_buy / volume_sell if volume_sell != 0 else float("inf")
+        volume_sum = volume_buy + volume_sell
+        order_imbalance = ((volume_buy - volume_sell) / volume_sum) if volume_sum != 0 else 0
+
+        metrics = TradeMetrics(
+            token_a=pair.token_a,
+            token_b=pair.token_b,
+            last_price=pair_df.price.iloc[-1],
+            min_price=pair_df.price.min(),
+            max_price=pair_df.price.max(),
+            mean_price=pair_df.price.mean(),
+            std_price=pair_df.price.std(),
+            volume_buy=volume_buy,
+            volume_sell=volume_sell,
+            pressure_ratio=pressure_ratio,
+            order_imbalance=order_imbalance,
+            trade_count=len(pair_df),
+        )
+        metrics_list.append(metrics)
+
+    return metrics_list
 
 
 # CoW Swap trading helper functions
