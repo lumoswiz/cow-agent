@@ -11,6 +11,7 @@ import requests
 from ape import Contract, accounts, chain
 from ape.api import BlockAPI
 from ape.types import LogFilter
+from ape_ethereum import multicall
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from silverback import SilverbackBot, StateSnapshot
@@ -22,9 +23,8 @@ bot = SilverbackBot()
 # File path configuration
 TRADE_FILEPATH = os.environ.get("TRADE_FILEPATH", ".db/trades.csv")
 BLOCK_FILEPATH = os.environ.get("BLOCK_FILEPATH", ".db/block.csv")
-GPV2_ABI_FILEPATH = os.environ.get("GPV2_ABI_FILEPATH", "./abi/GPv2Settlement.json")
-TOKEN_ALLOWLIST_FILEPATH = os.environ.get("TOKEN_ALLOWLIST_FILEPATH", "./abi/TokenAllowlist.json")
 ORDERS_FILEPATH = os.environ.get("ORDERS_FILEPATH", ".db/orders.csv")
+DECISIONS_FILEPATH = os.environ.get("DECISIONS_FILEPATH", ".db/decisions.csv")
 
 # Addresses
 SAFE_ADDRESS = "0x5aFE3855358E112B5647B952709E6165e1c1eEEe"  # PLACEHOLDER
@@ -36,9 +36,6 @@ COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
 WETH = "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"
 SAFE = "0x4d18815D14fe5c3304e87B3FA18318baa5c23820"
 WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
-
-TOKEN_NAMES = {GNO: "GNO", COW: "COW", WETH: "WETH", SAFE: "SAFE", WXDAI: "WXDAI"}
-
 MONITORED_TOKENS = [GNO, COW, WETH, SAFE, WXDAI]
 
 
@@ -54,8 +51,6 @@ def _load_abi(abi_name: str) -> Dict:
 GPV2_SETTLEMENT_CONTRACT = Contract(GPV2_SETTLEMENT_ADDRESS, abi=_load_abi("GPv2Settlement"))
 TOKEN_ALLOWLIST_CONTRACt = Contract(TOKEN_ALLOWLIST_ADDRESS, abi=_load_abi("TokenAllowlist"))
 
-# ABI
-GPV2_ORDER_ABI = _load_abi("GPv2Order")
 
 # API
 API_BASE_URL = "https://api.cow.fi/xdai/api/v1"
@@ -67,11 +62,88 @@ HISTORICAL_BLOCK_STEP = int(os.environ.get("HISTORICAL_BLOCK_STEP", 720))
 EXTENSION_INTERVAL = int(os.environ.get("EXTENSION_INTERVAL", 6))
 
 
+# Agents
 @dataclass
+class TradeMetrics(BaseModel):
+    token_a: str
+    token_b: str
+    last_price: float
+    min_price: float
+    max_price: float
+    mean_price: float
+    std_price: float
+    volume_buy: float
+    volume_sell: float
+    pressure_ratio: float
+    order_imbalance: float
+    trade_count: int
+
+
+def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
+    """Compute trading metrics for all token pairs in filtered DataFrame"""
+    if df.empty:
+        return []
+
+    latest_block = df.block_number.max()
+    filtered_df = df[df.block_number >= (latest_block - lookback_blocks)]
+
+    if filtered_df.empty:
+        return []
+
+    # Get unique token pairs
+    pairs_df = filtered_df[["token_a", "token_b"]].drop_duplicates()
+    metrics_list = []
+
+    for _, pair in pairs_df.iterrows():
+        pair_df = filtered_df[
+            (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
+        ]
+
+        volume_buy = pair_df.buyAmount.astype(float).sum()
+        volume_sell = pair_df.sellAmount.astype(float).sum()
+
+        pressure_ratio = volume_buy / volume_sell if volume_sell != 0 else float("inf")
+        volume_sum = volume_buy + volume_sell
+        order_imbalance = ((volume_buy - volume_sell) / volume_sum) if volume_sum != 0 else 0
+
+        metrics = TradeMetrics(
+            token_a=pair.token_a,
+            token_b=pair.token_b,
+            last_price=pair_df.price.iloc[-1],
+            min_price=pair_df.price.min(),
+            max_price=pair_df.price.max(),
+            mean_price=pair_df.price.mean(),
+            std_price=pair_df.price.std(),
+            volume_buy=volume_buy,
+            volume_sell=volume_sell,
+            pressure_ratio=pressure_ratio,
+            order_imbalance=order_imbalance,
+            trade_count=len(pair_df),
+        )
+        metrics_list.append(metrics)
+
+    return metrics_list
+
+
 class TradeContext:
-    """Trading context for price monitoring"""
+    """Context for agent analysis"""
 
     trades_df: pd.DataFrame
+    current_block: int
+    token_balances: Dict[str, int]
+    metrics: List[TradeMetrics]
+    lookback_blocks: int = 15000
+
+
+class AgentDecision(BaseModel):
+    """Agent's trading decision"""
+
+    block_number: int
+    should_trade: bool
+    sell_token: str | None
+    buy_token: str | None
+    reasoning: str
+    metrics_snapshot: List[TradeMetrics]
 
 
 trading_agent = Agent(
@@ -95,6 +167,33 @@ async def get_latest_prices(ctx: RunContext[TradeContext]) -> str:
             latest_prices.append(f"Price {latest.token_a}/{latest.token_b}: {latest.price}")
 
     return "Latest market prices:\n" + "\n".join(latest_prices)
+
+
+def _get_token_balances() -> Dict[str, int]:
+    """Get balances of monitored tokens using multicall"""
+    token_contracts = [
+        Contract(token_address, abi=_load_abi("IERC20")) for token_address in MONITORED_TOKENS
+    ]
+
+    call = multicall.Call()
+    for contract in token_contracts:
+        call.add(contract.balanceOf, SAFE_ADDRESS)
+
+    results = list(call())
+
+    return {token_address: balance for token_address, balance in zip(MONITORED_TOKENS, results)}
+
+
+@trading_agent.tool_plain
+def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
+    """Create TradeContext with all required data"""
+    return TradeContext(
+        trades_df=_load_trades_db(),
+        current_block=chain.blocks.head.number,
+        token_balances=_get_token_balances(),
+        metrics=compute_metrics(_load_trades_db(), lookback_blocks),
+        lookback_blocks=lookback_blocks,
+    )
 
 
 # Local storage helper functions
@@ -259,69 +358,6 @@ def extend_historical_trades() -> None:
     all_trades = all_trades.sort_values("block_number", ascending=True)
 
     _save_trades_db(all_trades)
-
-
-# Trade metrics
-class TradeMetrics(BaseModel):
-    token_a: str
-    token_b: str
-    last_price: float
-    min_price: float
-    max_price: float
-    mean_price: float
-    std_price: float
-    volume_buy: float
-    volume_sell: float
-    pressure_ratio: float
-    order_imbalance: float
-    trade_count: int
-
-
-def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
-    """Compute trading metrics for all token pairs in filtered DataFrame"""
-    if df.empty:
-        return []
-
-    latest_block = df.block_number.max()
-    filtered_df = df[df.block_number >= (latest_block - lookback_blocks)]
-
-    if filtered_df.empty:
-        return []
-
-    # Get unique token pairs
-    pairs_df = filtered_df[["token_a", "token_b"]].drop_duplicates()
-    metrics_list = []
-
-    for _, pair in pairs_df.iterrows():
-        pair_df = filtered_df[
-            (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
-        ]
-
-        volume_buy = pair_df.buyAmount.astype(float).sum()
-        volume_sell = pair_df.sellAmount.astype(float).sum()
-
-        # Avoid division by zero
-        pressure_ratio = volume_buy / volume_sell if volume_sell != 0 else float("inf")
-        volume_sum = volume_buy + volume_sell
-        order_imbalance = ((volume_buy - volume_sell) / volume_sum) if volume_sum != 0 else 0
-
-        metrics = TradeMetrics(
-            token_a=pair.token_a,
-            token_b=pair.token_b,
-            last_price=pair_df.price.iloc[-1],
-            min_price=pair_df.price.min(),
-            max_price=pair_df.price.max(),
-            mean_price=pair_df.price.mean(),
-            std_price=pair_df.price.std(),
-            volume_buy=volume_buy,
-            volume_sell=volume_sell,
-            pressure_ratio=pressure_ratio,
-            order_imbalance=order_imbalance,
-            trade_count=len(pair_df),
-        )
-        metrics_list.append(metrics)
-
-    return metrics_list
 
 
 # CoW Swap trading helper functions
