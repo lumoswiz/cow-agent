@@ -13,7 +13,7 @@ from ape.api import BlockAPI
 from ape.types import LogFilter
 from ape_ethereum import multicall
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from silverback import SilverbackBot, StateSnapshot
 from taskiq import Context, TaskiqDepends
 
@@ -135,38 +135,27 @@ class TradeContext:
     lookback_blocks: int = 15000
 
 
-class AgentDecision(BaseModel):
-    """Agent's trading decision"""
+class AgentResponse(BaseModel):
+    """Structured response from agent"""
 
-    block_number: int
     should_trade: bool
-    sell_token: str | None
-    buy_token: str | None
+    sell_token: str | None = None
+    buy_token: str | None = None
     reasoning: str
-    metrics_snapshot: List[TradeMetrics]
 
 
 trading_agent = Agent(
     "anthropic:claude-3-sonnet-20240229",
     deps_type=TradeContext,
-    system_prompt="I am a trading assistant monitoring CoW Swap prices.",
+    result_type=AgentResponse,
+    system_prompt="""You are a trading assistant monitoring CoW Swap prices.
+    Analyze market conditions and decide if we should trade.
+    If trading, specify which token to sell and which to buy.
+    Always explain your reasoning.
+    
+    Note: Only suggest trading tokens that we own (check token_balances).
+    """,
 )
-
-
-@trading_agent.system_prompt
-async def get_latest_prices(ctx: RunContext[TradeContext]) -> str:
-    """Get latest prices for monitored token pairs"""
-    df = ctx.deps.trades_df
-    pairs_df = df[["token_a", "token_b"]].drop_duplicates()
-
-    latest_prices = []
-    for _, pair in pairs_df.iterrows():
-        pair_trades = df[(df.token_a == pair.token_a) & (df.token_b == pair.token_b)]
-        if not pair_trades.empty:
-            latest = pair_trades.loc[pair_trades.block_number.idxmax()]
-            latest_prices.append(f"Price {latest.token_a}/{latest.token_b}: {latest.price}")
-
-    return "Latest market prices:\n" + "\n".join(latest_prices)
 
 
 def _get_token_balances() -> Dict[str, int]:
@@ -194,6 +183,27 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
         metrics=compute_metrics(_load_trades_db(), lookback_blocks),
         lookback_blocks=lookback_blocks,
     )
+
+
+def _save_decision(
+    block_number: int, response: AgentResponse, metrics: List[TradeMetrics]
+) -> pd.DataFrame:
+    """Add new decision to decisions database"""
+    decisions_df = _load_decisions_db()
+
+    new_decision = {
+        "block_number": block_number,
+        "should_trade": response.should_trade,
+        "sell_token": response.sell_token,
+        "buy_token": response.buy_token,
+        "reasoning": response.reasoning,
+        "metrics_snapshot": json.dumps([m.dict() for m in metrics]),
+    }
+
+    decisions_df = pd.concat([decisions_df, pd.DataFrame([new_decision])], ignore_index=True)
+
+    _save_decisions_db(decisions_df)
+    return decisions_df
 
 
 # Local storage helper functions
@@ -268,6 +278,31 @@ def _save_orders_db(df: pd.DataFrame) -> None:
     """Save orders to CSV file"""
     os.makedirs(os.path.dirname(ORDERS_FILEPATH), exist_ok=True)
     df.to_csv(ORDERS_FILEPATH, index=False)
+
+
+def _load_decisions_db() -> pd.DataFrame:
+    """Load decisions database from CSV file or create new if doesn't exist"""
+    dtype = {
+        "block_number": int,
+        "should_trade": bool,
+        "sell_token": str,
+        "buy_token": str,
+        "reasoning": str,
+        "metrics_snapshot": str,
+    }
+
+    df = (
+        pd.read_csv(DECISIONS_FILEPATH, dtype=dtype)
+        if os.path.exists(DECISIONS_FILEPATH)
+        else pd.DataFrame(columns=dtype.keys()).astype(dtype)
+    )
+    return df
+
+
+def _save_decisions_db(df: pd.DataFrame) -> None:
+    """Save decisions to CSV file"""
+    os.makedirs(os.path.dirname(DECISIONS_FILEPATH), exist_ok=True)
+    df.to_csv(DECISIONS_FILEPATH, index=False)
 
 
 # Historical log helper functions
