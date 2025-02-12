@@ -202,7 +202,7 @@ class AgentDecision(BaseModel):
 
 trading_agent = Agent(
     "anthropic:claude-3-sonnet-20240229",
-    deps_type=TradeContext,
+    deps_type=AgentDependencies,
     result_type=AgentResponse,
     system_prompt=SYSTEM_PROMPT,
 )
@@ -214,39 +214,62 @@ TOKEN_NAMES = {
 }
 
 
-@trading_agent.tool_plain
+@trading_agent.tool_plain(retries=3)
 def get_token_name(address: str) -> str:
-    """Get human readable token name from contract address"""
-    return TOKEN_NAMES.get(address, address)
+    """Return a human-readable token name for the provided address."""
+    try:
+        return TOKEN_NAMES.get(address, address)
+    except Exception as e:
+        print(f"[get_token_name] failed with error: {e}")
+        raise
 
 
-@trading_agent.tool_plain
-def get_eligible_buy_tokens(ctx: RunContext[AgentDependencies]) -> List[str]:
-    """
-    Get list of tokens that can be bought, excluding the sell token.
-    Returns list of token addresses that are eligible for buying.
-    """
-    sell_token = ctx.deps.sell_token
-    return [token for token in MONITORED_TOKENS if token != sell_token]
+@trading_agent.tool_plain(retries=3)
+def get_eligible_buy_tokens(ctx: AgentDependencies) -> List[str]:
+    """Return a list of tokens eligible for purchase (excluding the sell token)."""
+    try:
+        sell_token = ctx.sell_token
+        return [token for token in MONITORED_TOKENS if token != sell_token]
+    except Exception as e:
+        print(f"[get_eligible_buy_tokens] failed with error: {e}")
+        raise
 
 
-@trading_agent.tool_plain
+@trading_agent.tool_plain(retries=3)
 def get_token_type(token: str) -> Dict:
-    """
-    Get token type and characteristics.
-    Helps understand if token is stable or volatile.
-    """
-    is_stable = token == WXDAI
-
-    return {
-        "token": get_token_name(token),
-        "is_stable": is_stable,
-        "expected_behavior": (
-            "USD value stable, good for preserving value"
+    """Determine if the token is stable or volatile."""
+    try:
+        is_stable = token == WXDAI
+        return {
+            "token": get_token_name(token),
+            "is_stable": is_stable,
+            "expected_behavior": "USD value stable, good for preserving value"
             if is_stable
-            else "USD value can fluctuate"
-        ),
-    }
+            else "USD value can fluctuate",
+        }
+    except Exception as e:
+        print(f"[get_token_type] failed with error: {e}")
+        raise
+
+
+@trading_agent.tool(retries=3)
+def get_trading_context(ctx: RunContext[AgentDependencies]) -> TradeContext:
+    """Return the trading context from the agent's dependencies."""
+    try:
+        return ctx.deps.trade_ctx
+    except Exception as e:
+        print(f"[get_trading_context] failed with error: {e}")
+        raise
+
+
+@trading_agent.tool(retries=3)
+def get_sell_token(ctx: RunContext[AgentDependencies]) -> str | None:
+    """Return the sell token from the agent's dependencies."""
+    try:
+        return ctx.deps.sell_token
+    except Exception as e:
+        print(f"[get_sell_token] failed with error: {e}")
+        raise
 
 
 def _get_token_balances() -> Dict[str, int]:
@@ -291,26 +314,29 @@ def _select_sell_token() -> str | None:
 
 
 def _build_decision(
-    block_number: int, response: AgentResponse, metrics: List[TradeMetrics], sell_token: str | None
+    block_number: int,
+    response: AgentResponse,
+    metrics: List[TradeMetrics],
+    sell_token: str,
 ) -> AgentDecision:
-    """Build structured AgentDecision from raw response"""
+    """Build decision dict from agent response"""
     return AgentDecision(
         block_number=block_number,
         should_trade=response.should_trade,
         sell_token=sell_token if response.should_trade else None,
-        buy_token=response.buy_token,
+        buy_token=response.buy_token if response.should_trade else None,
         metrics_snapshot=metrics,
-        profitable=2,
+        reasoning=response.reasoning,
         valid=False,
     )
 
 
-def _validate_decision(decision: AgentDecision, trade_context: TradeContext) -> bool:
+def _validate_decision(decision: AgentDecision) -> bool:
     """
     Validate decision structure and buy token validity
     """
-    if not decision.should_trade:
-        return True
+    if not decision.should_trade or decision.sell_token is None or decision.buy_token is None:
+        return False
 
     if decision.buy_token not in MONITORED_TOKENS or decision.buy_token == decision.sell_token:
         click.echo(f"Invalid buy token: buy={decision.buy_token}")
@@ -565,28 +591,6 @@ def _catch_up_trades(current_block: int, next_decision_block: int, buffer_blocks
     )
 
 
-def _extend_historical_trades() -> None:
-    """Extend trades.csv data further back in history"""
-    trades_df = _load_trades_db()
-
-    if len(trades_df) == 0:
-        oldest_block = chain.blocks.head.number
-    else:
-        oldest_block = trades_df["block_number"].min()
-
-    new_trades = _process_historical_trades(
-        GPV2_SETTLEMENT_CONTRACT,
-        start_block=oldest_block - HISTORICAL_BLOCK_STEP,
-        stop_block=oldest_block - 1,
-    )
-
-    new_trades_df = pd.DataFrame(new_trades)
-    all_trades = pd.concat([new_trades_df, trades_df])
-    all_trades = all_trades.sort_values("block_number", ascending=True)
-
-    _save_trades_db(all_trades)
-
-
 # CoW Swap trading helper functions
 def _construct_quote_payload(
     sell_token: str,
@@ -802,7 +806,7 @@ def exec_block(block: BlockAPI):
         sell_token=sell_token,
     )
 
-    decision.valid = _validate_decision(decision, trade_ctx)
+    decision.valid = _validate_decision(decision)
     _save_decision(decision)
     bot.state.next_decision_block = block.number + TRADING_BLOCK_COOLDOWN
 
