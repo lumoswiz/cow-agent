@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
@@ -13,7 +14,7 @@ from ape.api import BlockAPI
 from ape.types import LogFilter
 from ape_ethereum import multicall
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from silverback import SilverbackBot, StateSnapshot
 
 # Initialize bot
@@ -33,16 +34,12 @@ GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
 
 GNO = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
-WETH = "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"
-SAFE = "0x4d18815D14fe5c3304e87B3FA18318baa5c23820"
 WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
-MONITORED_TOKENS = [GNO, COW, WETH, SAFE, WXDAI]
+MONITORED_TOKENS = [GNO, COW, WXDAI]
 
 MINIMUM_TOKEN_BALANCES = {
     GNO: 5e16,
     COW: 25e18,
-    WETH: 38e14,
-    SAFE: 15e18,
     WXDAI: 10e18,
 }
 
@@ -175,11 +172,18 @@ class TradeContext(BaseModel):
     lookback_blocks: int = 15000
 
 
+@dataclass
+class AgentDependencies:
+    """Dependencies for trading agent"""
+
+    trade_ctx: TradeContext
+    sell_token: str | None
+
+
 class AgentResponse(BaseModel):
     """Structured response from agent"""
 
     should_trade: bool
-    sell_token: str | None = None
     buy_token: str | None = None
     reasoning: str
 
@@ -206,8 +210,6 @@ trading_agent = Agent(
 TOKEN_NAMES = {
     "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb": "GNO",
     "0x177127622c4A00F3d409B75571e12cB3c8973d3c": "COW",
-    "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1": "WETH",
-    "0x4d18815D14fe5c3304e87B3FA18318baa5c23820": "SAFE",
     "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d": "WXDAI",
 }
 
@@ -216,6 +218,16 @@ TOKEN_NAMES = {
 def get_token_name(address: str) -> str:
     """Get human readable token name from contract address"""
     return TOKEN_NAMES.get(address, address)
+
+
+@trading_agent.tool_plain
+def get_eligible_buy_tokens(ctx: RunContext[AgentDependencies]) -> List[str]:
+    """
+    Get list of tokens that can be bought, excluding the sell token.
+    Returns list of token addresses that are eligible for buying.
+    """
+    sell_token = ctx.deps.sell_token
+    return [token for token in MONITORED_TOKENS if token != sell_token]
 
 
 def _get_token_balances() -> Dict[str, int]:
@@ -231,8 +243,7 @@ def _get_token_balances() -> Dict[str, int]:
     return {token_address: balance for token_address, balance in zip(MONITORED_TOKENS, results)}
 
 
-@trading_agent.tool_plain
-def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
+def _create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     """Create TradeContext with all required data"""
     trades_df = _load_trades_db()
     decisions_df = _load_decisions_db()
@@ -248,20 +259,26 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     )
 
 
-@trading_agent.tool_plain
-def get_minimum_token_balances() -> Dict[str, float]:
-    """Get dictionary of minimum required balances for all monitored tokens"""
-    return {addr: float(amount) for addr, amount in MINIMUM_TOKEN_BALANCES.items()}
+def _select_sell_token() -> str | None:
+    """
+    Select token to sell based on current balances and minimum thresholds.
+    Returns the token address that has a balance above threshold, or None if no token qualifies.
+    """
+    balances = _get_token_balances()
+    valid_tokens = [
+        token for token in MONITORED_TOKENS if balances[token] > MINIMUM_TOKEN_BALANCES[token]
+    ]
+    return valid_tokens[0] if valid_tokens else None
 
 
 def _build_decision(
-    block_number: int, response: AgentResponse, metrics: List[TradeMetrics]
+    block_number: int, response: AgentResponse, metrics: List[TradeMetrics], sell_token: str | None
 ) -> AgentDecision:
     """Build structured AgentDecision from raw response"""
     return AgentDecision(
         block_number=block_number,
         should_trade=response.should_trade,
-        sell_token=response.sell_token,
+        sell_token=sell_token if response.should_trade else None,
         buy_token=response.buy_token,
         metrics_snapshot=metrics,
         profitable=2,
@@ -271,31 +288,13 @@ def _build_decision(
 
 def _validate_decision(decision: AgentDecision, trade_context: TradeContext) -> bool:
     """
-    Validate decision structure, token validity, and balance requirements
-    Args:
-        decision: The trading decision to validate
-        trade_context: Current trading context with balances and metrics
-    Returns:
-        bool: True if valid, False otherwise
+    Validate decision structure and buy token validity
     """
     if not decision.should_trade:
         return True
 
-    if (
-        decision.sell_token not in MONITORED_TOKENS
-        or decision.buy_token not in MONITORED_TOKENS
-        or decision.sell_token == decision.buy_token
-    ):
-        click.echo(f"Invalid token pair: sell={decision.sell_token}, buy={decision.buy_token}")
-        return False
-
-    sell_balance = trade_context.token_balances[decision.sell_token]
-    min_balance = MINIMUM_TOKEN_BALANCES[decision.sell_token]
-
-    if sell_balance < min_balance:
-        click.echo(
-            f"Insufficient balance for {decision.sell_token}: {sell_balance} < {min_balance}"
-        )
+    if decision.buy_token not in MONITORED_TOKENS or decision.buy_token == decision.sell_token:
+        click.echo(f"Invalid buy token: buy={decision.buy_token}")
         return False
 
     return True
@@ -749,7 +748,7 @@ def exec_block(block: BlockAPI):
     if not should_trade:
         return
 
-    trade_ctx = create_trade_context()
+    trade_ctx = _create_trade_context()
 
     if latest_decision is not None and latest_decision.should_trade:
         _update_latest_decision_outcome(
@@ -761,12 +760,15 @@ def exec_block(block: BlockAPI):
             )
         )
 
+    sell_token = _select_sell_token()
+    deps = AgentDependencies(trade_ctx=trade_ctx, sell_token=sell_token)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     try:
         result = bot.state.agent.run_sync(
-            "Analyze current market conditions and make a trading decision", deps=trade_ctx
+            "Analyze current market conditions and make a trading decision", deps=deps
         )
     except Exception as e:
         click.echo(f"Anthropic API error at block {block.number}: {str(e)}")
@@ -775,7 +777,10 @@ def exec_block(block: BlockAPI):
     _save_reasoning(block.number, result.data.reasoning)
 
     decision = _build_decision(
-        block_number=block.number, response=result.data, metrics=trade_ctx.metrics
+        block_number=block.number,
+        response=result.data,
+        metrics=trade_ctx.metrics,
+        sell_token=sell_token,
     )
 
     decision.valid = _validate_decision(decision, trade_ctx)
