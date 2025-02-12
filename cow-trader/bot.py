@@ -208,9 +208,9 @@ trading_agent = Agent(
 )
 
 TOKEN_NAMES = {
-    "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb": "GNO",
-    "0x177127622c4A00F3d409B75571e12cB3c8973d3c": "COW",
-    "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d": "WXDAI",
+    GNO: "GNO",
+    COW: "COW",
+    WXDAI: "WXDAI",
 }
 
 
@@ -228,6 +228,25 @@ def get_eligible_buy_tokens(ctx: RunContext[AgentDependencies]) -> List[str]:
     """
     sell_token = ctx.deps.sell_token
     return [token for token in MONITORED_TOKENS if token != sell_token]
+
+
+@trading_agent.tool_plain
+def get_token_type(token: str) -> Dict:
+    """
+    Get token type and characteristics.
+    Helps understand if token is stable or volatile.
+    """
+    is_stable = token == WXDAI
+
+    return {
+        "token": get_token_name(token),
+        "is_stable": is_stable,
+        "expected_behavior": (
+            "USD value stable, good for preserving value"
+            if is_stable
+            else "USD value can fluctuate"
+        ),
+    }
 
 
 def _get_token_balances() -> Dict[str, int]:
