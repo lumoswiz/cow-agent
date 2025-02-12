@@ -24,8 +24,6 @@ interface ISafe {
     --broadcast -vvvv
 */
 contract EnableTradingModule is ScriptUtils {
-    address internal constant SAFE = 0x5aFE3855358E112B5647B952709E6165e1c1eEEe;
-
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
 

@@ -27,9 +27,6 @@ interface ISingletonFactory {
 */
 
 contract DeployMasterCopy is ScriptUtils {
-    address internal constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
-    address internal constant ZERO_ADDRESS = address(0);
-
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
 
