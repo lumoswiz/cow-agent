@@ -2,9 +2,10 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Dict, List
+from typing import Dict, List
 
 import click
+import numpy as np
 import pandas as pd
 import requests
 from ape import Contract, accounts, chain
@@ -14,7 +15,6 @@ from ape_ethereum import multicall
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from silverback import SilverbackBot, StateSnapshot
-from taskiq import Context, TaskiqDepends
 
 # Initialize bot
 bot = SilverbackBot()
@@ -81,11 +81,13 @@ class TradeMetrics(BaseModel):
     max_price: float
     volume_buy: float
     volume_sell: float
-    order_imbalance: float
+    up_moves_ratio: float
+    max_up_streak: int
+    max_down_streak: int
     trade_count: int
 
 
-def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
+def _compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
     """Compute trading metrics for all token pairs in filtered DataFrame"""
     if df.empty:
         return []
@@ -100,28 +102,66 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
     metrics_list = []
 
     for _, pair in pairs_df.iterrows():
-        pair_df = filtered_df[
-            (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
-        ]
+        try:
+            pair_df = filtered_df[
+                (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
+            ].sort_values("block_number")
 
-        volume_buy = pair_df.buyAmount.astype(float).sum()
-        volume_sell = pair_df.sellAmount.astype(float).sum()
+            pair_df = pair_df[pair_df.price.notna()]
 
-        volume_sum = volume_buy + volume_sell
-        order_imbalance = ((volume_buy - volume_sell) / volume_sum) if volume_sum != 0 else 0
+            if pair_df.empty:
+                continue
 
-        metrics = TradeMetrics(
-            token_a=pair.token_a,
-            token_b=pair.token_b,
-            last_price=pair_df.price.iloc[-1],
-            min_price=pair_df.price.min(),
-            max_price=pair_df.price.max(),
-            volume_buy=volume_buy,
-            volume_sell=volume_sell,
-            order_imbalance=order_imbalance,
-            trade_count=len(pair_df),
-        )
-        metrics_list.append(metrics)
+            try:
+                volume_buy = pair_df.buyAmount.astype(float).sum()
+                volume_sell = pair_df.sellAmount.astype(float).sum()
+            except (ValueError, TypeError):
+                volume_buy = volume_sell = 0.0
+
+            prices = pair_df.price.values
+
+            up_moves_ratio = 0.5
+            max_up_streak = 0
+            max_down_streak = 0
+
+            if len(prices) >= 2:
+                price_changes = np.sign(np.diff(prices))
+                non_zero_moves = price_changes[price_changes != 0]
+
+                if len(non_zero_moves) > 0:
+                    up_moves_ratio = np.mean(non_zero_moves > 0)
+
+                if len(price_changes) > 1:
+                    try:
+                        change_points = np.where(price_changes[1:] != price_changes[:-1])[0] + 1
+                        if len(change_points) > 0:
+                            streaks = np.split(price_changes, change_points)
+                            max_up_streak = max(
+                                (len(s) for s in streaks if len(s) > 0 and s[0] > 0), default=0
+                            )
+                            max_down_streak = max(
+                                (len(s) for s in streaks if len(s) > 0 and s[0] < 0), default=0
+                            )
+                    except Exception:
+                        pass
+
+            metrics = TradeMetrics(
+                token_a=pair.token_a,
+                token_b=pair.token_b,
+                last_price=float(prices[-1]),
+                min_price=float(np.min(prices)),
+                max_price=float(np.max(prices)),
+                volume_buy=float(volume_buy),
+                volume_sell=float(volume_sell),
+                up_moves_ratio=float(up_moves_ratio),
+                max_up_streak=int(max_up_streak),
+                max_down_streak=int(max_down_streak),
+                trade_count=len(pair_df),
+            )
+            metrics_list.append(metrics)
+        except Exception as e:
+            click.echo(f"Error processing pair {pair.token_a}-{pair.token_b}: {str(e)}")
+            continue
 
     return metrics_list
 
@@ -197,12 +237,21 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     trades_df = _load_trades_db()
     decisions_df = _load_decisions_db()
 
+    prior_decisions = decisions_df.tail(3).copy()
+    prior_decisions["metrics_snapshot"] = prior_decisions["metrics_snapshot"].apply(json.loads)
+
     return TradeContext(
         token_balances=_get_token_balances(),
-        metrics=compute_metrics(trades_df, lookback_blocks),
-        prior_decisions=decisions_df.tail(10).to_dict("records"),
+        metrics=_compute_metrics(trades_df, lookback_blocks),
+        prior_decisions=prior_decisions.to_dict("records"),
         lookback_blocks=lookback_blocks,
     )
+
+
+@trading_agent.tool_plain
+def get_minimum_token_balances() -> Dict[str, float]:
+    """Get dictionary of minimum required balances for all monitored tokens"""
+    return {addr: float(amount) for addr, amount in MINIMUM_TOKEN_BALANCES.items()}
 
 
 def _build_decision(
@@ -481,6 +530,23 @@ def _process_historical_trades(
     return trades
 
 
+def _catch_up_trades(current_block: int, next_decision_block: int, buffer_blocks: int = 5) -> None:
+    """
+    Catch up on trade events from last processed block until shortly before next decision
+    """
+    trades_df = _load_trades_db()
+    last_processed_block = trades_df["block_number"].max() if not trades_df.empty else START_BLOCK
+
+    target_block = min(current_block, next_decision_block - buffer_blocks)
+
+    if target_block <= last_processed_block:
+        return
+
+    _process_historical_trades(
+        GPV2_SETTLEMENT_CONTRACT, start_block=last_processed_block + 1, stop_block=target_block
+    )
+
+
 def _extend_historical_trades() -> None:
     """Extend trades.csv data further back in history"""
     trades_df = _load_trades_db()
@@ -642,6 +708,7 @@ def bot_startup(startup_state: StateSnapshot):
     """Initialize bot state and historical data"""
     block_db = _load_block_db()
     last_processed_block = block_db["last_processed_block"]
+    _save_block_db({"last_processed_block": chain.blocks.head.number})
 
     _process_historical_trades(
         GPV2_SETTLEMENT_CONTRACT,
@@ -649,16 +716,26 @@ def bot_startup(startup_state: StateSnapshot):
         stop_block=chain.blocks.head.number,
     )
 
-    _save_block_db({"last_processed_block": chain.blocks.head.number})
-    bot.state.last_extension_block = chain.blocks.head.number
     bot.state.agent = trading_agent
+
+    decisions_df = _load_decisions_db()
+    if decisions_df.empty:
+        bot.state.next_decision_block = chain.blocks.head.number
+    else:
+        bot.state.next_decision_block = decisions_df.iloc[-1].block_number + TRADING_BLOCK_COOLDOWN
+
     return {"message": "Starting...", "block_number": startup_state.last_block_seen}
 
 
 @bot.on_(chain.blocks)
-def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
+def exec_block(block: BlockAPI):
     """Execute block handler with structured decision flow"""
     _save_block_db({"last_processed_block": block.number})
+
+    if (bot.state.next_decision_block - block.number) <= 5:
+        _catch_up_trades(
+            current_block=block.number, next_decision_block=bot.state.next_decision_block
+        )
 
     decisions_df = _load_decisions_db()
 
@@ -703,6 +780,7 @@ def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
 
     decision.valid = _validate_decision(decision, trade_ctx)
     _save_decision(decision)
+    bot.state.next_decision_block = block.number + TRADING_BLOCK_COOLDOWN
 
     if decision.valid:
         order_uid, error = create_and_submit_order(
