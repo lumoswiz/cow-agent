@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import click
+import numpy as np
 import pandas as pd
 import requests
 from ape import Contract, accounts, chain
@@ -80,11 +81,13 @@ class TradeMetrics(BaseModel):
     max_price: float
     volume_buy: float
     volume_sell: float
-    order_imbalance: float
+    up_moves_ratio: float
+    max_up_streak: int
+    max_down_streak: int
     trade_count: int
 
 
-def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
+def _compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[TradeMetrics]:
     """Compute trading metrics for all token pairs in filtered DataFrame"""
     if df.empty:
         return []
@@ -99,28 +102,66 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
     metrics_list = []
 
     for _, pair in pairs_df.iterrows():
-        pair_df = filtered_df[
-            (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
-        ]
+        try:
+            pair_df = filtered_df[
+                (filtered_df.token_a == pair.token_a) & (filtered_df.token_b == pair.token_b)
+            ].sort_values("block_number")
 
-        volume_buy = pair_df.buyAmount.astype(float).sum()
-        volume_sell = pair_df.sellAmount.astype(float).sum()
+            pair_df = pair_df[pair_df.price.notna()]
 
-        volume_sum = volume_buy + volume_sell
-        order_imbalance = ((volume_buy - volume_sell) / volume_sum) if volume_sum != 0 else 0
+            if pair_df.empty:
+                continue
 
-        metrics = TradeMetrics(
-            token_a=pair.token_a,
-            token_b=pair.token_b,
-            last_price=pair_df.price.iloc[-1],
-            min_price=pair_df.price.min(),
-            max_price=pair_df.price.max(),
-            volume_buy=volume_buy,
-            volume_sell=volume_sell,
-            order_imbalance=order_imbalance,
-            trade_count=len(pair_df),
-        )
-        metrics_list.append(metrics)
+            try:
+                volume_buy = pair_df.buyAmount.astype(float).sum()
+                volume_sell = pair_df.sellAmount.astype(float).sum()
+            except (ValueError, TypeError):
+                volume_buy = volume_sell = 0.0
+
+            prices = pair_df.price.values
+
+            up_moves_ratio = 0.5
+            max_up_streak = 0
+            max_down_streak = 0
+
+            if len(prices) >= 2:
+                price_changes = np.sign(np.diff(prices))
+                non_zero_moves = price_changes[price_changes != 0]
+
+                if len(non_zero_moves) > 0:
+                    up_moves_ratio = np.mean(non_zero_moves > 0)
+
+                if len(price_changes) > 1:
+                    try:
+                        change_points = np.where(price_changes[1:] != price_changes[:-1])[0] + 1
+                        if len(change_points) > 0:
+                            streaks = np.split(price_changes, change_points)
+                            max_up_streak = max(
+                                (len(s) for s in streaks if len(s) > 0 and s[0] > 0), default=0
+                            )
+                            max_down_streak = max(
+                                (len(s) for s in streaks if len(s) > 0 and s[0] < 0), default=0
+                            )
+                    except Exception:
+                        pass
+
+            metrics = TradeMetrics(
+                token_a=pair.token_a,
+                token_b=pair.token_b,
+                last_price=float(prices[-1]),
+                min_price=float(np.min(prices)),
+                max_price=float(np.max(prices)),
+                volume_buy=float(volume_buy),
+                volume_sell=float(volume_sell),
+                up_moves_ratio=float(up_moves_ratio),
+                max_up_streak=int(max_up_streak),
+                max_down_streak=int(max_down_streak),
+                trade_count=len(pair_df),
+            )
+            metrics_list.append(metrics)
+        except Exception as e:
+            click.echo(f"Error processing pair {pair.token_a}-{pair.token_b}: {str(e)}")
+            continue
 
     return metrics_list
 
@@ -201,10 +242,16 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
 
     return TradeContext(
         token_balances=_get_token_balances(),
-        metrics=compute_metrics(trades_df, lookback_blocks),
+        metrics=_compute_metrics(trades_df, lookback_blocks),
         prior_decisions=prior_decisions.to_dict("records"),
         lookback_blocks=lookback_blocks,
     )
+
+
+@trading_agent.tool_plain
+def get_minimum_token_balances() -> Dict[str, float]:
+    """Get dictionary of minimum required balances for all monitored tokens"""
+    return {addr: float(amount) for addr, amount in MINIMUM_TOKEN_BALANCES.items()}
 
 
 def _build_decision(
