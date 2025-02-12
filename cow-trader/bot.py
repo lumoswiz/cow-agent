@@ -152,7 +152,7 @@ class AgentDecision(BaseModel):
     sell_token: str | None = None
     buy_token: str | None = None
     metrics_snapshot: List[TradeMetrics]
-    profitable: bool | None = None
+    profitable: int = 2
     valid: bool = False
 
 
@@ -215,7 +215,7 @@ def _build_decision(
         sell_token=response.sell_token,
         buy_token=response.buy_token,
         metrics_snapshot=metrics,
-        profitable=None,
+        profitable=2,
         valid=False,
     )
 
@@ -387,14 +387,14 @@ def _save_orders_db(df: pd.DataFrame) -> None:
 
 
 def _load_decisions_db() -> pd.DataFrame:
-    """Load decisions database from CSV file or create new if doesn't exist"""
+    """Load decisions database from CSV file"""
     dtype = {
         "block_number": int,
         "should_trade": bool,
         "sell_token": str,
         "buy_token": str,
         "metrics_snapshot": str,
-        "profitable": bool,
+        "profitable": int,
         "valid": bool,
     }
 
@@ -408,6 +408,7 @@ def _load_decisions_db() -> pd.DataFrame:
 
 def _save_decisions_db(df: pd.DataFrame) -> None:
     """Save decisions to CSV file"""
+    df = df.copy()
     os.makedirs(os.path.dirname(DECISIONS_FILEPATH), exist_ok=True)
     df.to_csv(DECISIONS_FILEPATH, index=False)
 
@@ -480,7 +481,7 @@ def _process_historical_trades(
     return trades
 
 
-def extend_historical_trades() -> None:
+def _extend_historical_trades() -> None:
     """Extend trades.csv data further back in history"""
     trades_df = _load_trades_db()
 
