@@ -27,7 +27,7 @@ DECISIONS_FILEPATH = os.environ.get("DECISIONS_FILEPATH", ".db/decisions.csv")
 REASONING_FILEPATH = os.environ.get("REASONING_FILEPATH", ".db/reasoning.csv")
 
 # Addresses
-SAFE_ADDRESS = "0x5aFE3855358E112B5647B952709E6165e1c1eEEe"  # PLACEHOLDER
+SAFE_ADDRESS = "0xE1eB9cF168DB37c31B4bDf73511Bf44E2B8027Ef"  # PLACEHOLDER
 TOKEN_ALLOWLIST_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
 GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
 
@@ -37,6 +37,14 @@ WETH = "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"
 SAFE = "0x4d18815D14fe5c3304e87B3FA18318baa5c23820"
 WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
 MONITORED_TOKENS = [GNO, COW, WETH, SAFE, WXDAI]
+
+MINIMUM_TOKEN_BALANCES = {
+    GNO: 5e16,
+    COW: 25e18,
+    WETH: 38e14,
+    SAFE: 15e18,
+    WXDAI: 10e18,
+}
 
 
 # ABI
@@ -88,7 +96,6 @@ def compute_metrics(df: pd.DataFrame, lookback_blocks: int = 15000) -> List[Trad
     if filtered_df.empty:
         return []
 
-    # Get unique token pairs
     pairs_df = filtered_df[["token_a", "token_b"]].drop_duplicates()
     metrics_list = []
 
@@ -127,8 +134,6 @@ class TradeContext(BaseModel):
     prior_decisions: List[Dict]
     lookback_blocks: int = 15000
 
-    # model_config = {"arbitrary_types_allowed": True}
-
 
 class AgentResponse(BaseModel):
     """Structured response from agent"""
@@ -148,6 +153,7 @@ class AgentDecision(BaseModel):
     buy_token: str | None = None
     metrics_snapshot: List[TradeMetrics]
     profitable: bool | None = None
+    valid: bool = False
 
 
 trading_agent = Agent(
@@ -199,23 +205,65 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     )
 
 
-def _save_decision(
+def _build_decision(
     block_number: int, response: AgentResponse, metrics: List[TradeMetrics]
-) -> pd.DataFrame:
-    """Add new decision to decisions database"""
+) -> AgentDecision:
+    """Build structured AgentDecision from raw response"""
+    return AgentDecision(
+        block_number=block_number,
+        should_trade=response.should_trade,
+        sell_token=response.sell_token,
+        buy_token=response.buy_token,
+        metrics_snapshot=metrics,
+        profitable=None,
+        valid=False,
+    )
+
+
+def _validate_decision(decision: AgentDecision, trade_context: TradeContext) -> bool:
+    """
+    Validate decision structure, token validity, and balance requirements
+    Args:
+        decision: The trading decision to validate
+        trade_context: Current trading context with balances and metrics
+    Returns:
+        bool: True if valid, False otherwise
+    """
+    if not decision.should_trade:
+        return True
+
+    if (
+        decision.sell_token not in MONITORED_TOKENS
+        or decision.buy_token not in MONITORED_TOKENS
+        or decision.sell_token == decision.buy_token
+    ):
+        click.echo(f"Invalid token pair: sell={decision.sell_token}, buy={decision.buy_token}")
+        return False
+
+    sell_balance = trade_context.token_balances[decision.sell_token]
+    min_balance = MINIMUM_TOKEN_BALANCES[decision.sell_token]
+
+    if sell_balance < min_balance:
+        click.echo(
+            f"Insufficient balance for {decision.sell_token}: {sell_balance} < {min_balance}"
+        )
+        return False
+
+    return True
+
+
+def _save_decision(decision: AgentDecision) -> pd.DataFrame:
+    """Save validated decision to database"""
     decisions_df = _load_decisions_db()
 
-    # Save reasoning separately
-    _save_reasoning(block_number, response.reasoning)
-
-    # Save decision with metrics snapshot
     new_decision = {
-        "block_number": block_number,
-        "should_trade": response.should_trade,
-        "sell_token": response.sell_token,
-        "buy_token": response.buy_token,
-        "metrics_snapshot": json.dumps([m.dict() for m in metrics]),
-        "profitable": None,
+        "block_number": decision.block_number,
+        "should_trade": decision.should_trade,
+        "sell_token": decision.sell_token,
+        "buy_token": decision.buy_token,
+        "metrics_snapshot": json.dumps([m.dict() for m in decision.metrics_snapshot]),
+        "profitable": decision.profitable,
+        "valid": decision.valid,
     }
 
     decisions_df = pd.concat([decisions_df, pd.DataFrame([new_decision])], ignore_index=True)
@@ -345,8 +393,9 @@ def _load_decisions_db() -> pd.DataFrame:
         "should_trade": bool,
         "sell_token": str,
         "buy_token": str,
-        "reasoning": str,
         "metrics_snapshot": str,
+        "profitable": bool,
+        "valid": bool,
     }
 
     df = (
@@ -607,13 +656,11 @@ def bot_startup(startup_state: StateSnapshot):
 
 @bot.on_(chain.blocks)
 def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
-    """Execute block handler"""
+    """Execute block handler with structured decision flow"""
     _save_block_db({"last_processed_block": block.number})
 
-    # Load decisions once
     decisions_df = _load_decisions_db()
 
-    # Early return if no cooldown or no previous decisions
     if decisions_df.empty:
         should_trade = True
         latest_decision = None
@@ -624,10 +671,8 @@ def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
     if not should_trade:
         return
 
-    # Create trade context
     trade_ctx = create_trade_context()
 
-    # Update previous decision outcome if it exists and was a trade
     if latest_decision is not None and latest_decision.should_trade:
         _update_latest_decision_outcome(
             final_price=next(
@@ -638,25 +683,33 @@ def exec_block(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
             )
         )
 
-    # Setup async loop for agent
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Run agent
-    result = bot.state.agent.run_sync(
-        "Analyze current market conditions and make a trading decision", deps=trade_ctx
+    try:
+        result = bot.state.agent.run_sync(
+            "Analyze current market conditions and make a trading decision", deps=trade_ctx
+        )
+    except Exception as e:
+        click.echo(f"Anthropic API error at block {block.number}: {str(e)}")
+        return
+
+    _save_reasoning(block.number, result.data.reasoning)
+
+    decision = _build_decision(
+        block_number=block.number, response=result.data, metrics=trade_ctx.metrics
     )
 
-    # Save new decision with metrics
-    _save_decision(block_number=block.number, response=result.data, metrics=trade_ctx.metrics)
+    decision.valid = _validate_decision(decision, trade_ctx)
+    _save_decision(decision)
 
-
-#    """Execute block handler"""
-#    order_uid, error = create_and_submit_order(
-#        sell_token=GNO, buy_token=COW, sell_amount="20000000000000000000"
-#    )
-#
-#    if error:
-#        click.echo(f"Order failed: {error}")
-#    else:
-#        click.echo(f"Order submitted successfully. UID: {order_uid}")
+    if decision.valid:
+        order_uid, error = create_and_submit_order(
+            sell_token=decision.sell_token,
+            buy_token=decision.buy_token,
+            sell_amount=trade_ctx.token_balances[decision.sell_token],
+        )
+        if error:
+            click.echo(f"Order failed: {error}")
+        else:
+            click.echo(f"Order submitted successfully. UID: {order_uid}")
