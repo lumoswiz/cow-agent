@@ -27,14 +27,11 @@ interface ISingletonFactory {
 */
 
 contract DeployMasterCopy is ScriptUtils {
-    address internal constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
-    address internal constant ZERO_ADDRESS = address(0);
-
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
 
         bytes memory creationCode = type(TradingModule).creationCode;
-        bytes memory constructorArgs = abi.encode(ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS);
+        bytes memory constructorArgs = abi.encode(vm.addr(pk), ZERO_ADDRESS, ZERO_ADDRESS);
         bytes memory initCode = abi.encodePacked(creationCode, constructorArgs);
 
         bytes32 salt = keccak256(abi.encodePacked("TradingModuleV1"));

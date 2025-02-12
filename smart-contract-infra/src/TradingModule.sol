@@ -40,9 +40,6 @@ contract TradingModule is Module, Guardable {
     function setUp(bytes memory initParams) public override initializer {
         (address _owner, address _avatar, address _target) = abi.decode(initParams, (address, address, address));
 
-        require(_avatar != address(0));
-        require(_target != address(0));
-
         __Ownable_init(msg.sender);
 
         setAvatar(_avatar);
