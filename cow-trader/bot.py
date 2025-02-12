@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
@@ -13,7 +14,7 @@ from ape.api import BlockAPI
 from ape.types import LogFilter
 from ape_ethereum import multicall
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from silverback import SilverbackBot, StateSnapshot
 
 # Initialize bot
@@ -33,16 +34,12 @@ GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
 
 GNO = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
-WETH = "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1"
-SAFE = "0x4d18815D14fe5c3304e87B3FA18318baa5c23820"
 WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
-MONITORED_TOKENS = [GNO, COW, WETH, SAFE, WXDAI]
+MONITORED_TOKENS = [GNO, COW, WXDAI]
 
 MINIMUM_TOKEN_BALANCES = {
     GNO: 5e16,
     COW: 25e18,
-    WETH: 38e14,
-    SAFE: 15e18,
     WXDAI: 10e18,
 }
 
@@ -175,11 +172,18 @@ class TradeContext(BaseModel):
     lookback_blocks: int = 15000
 
 
+@dataclass
+class AgentDependencies:
+    """Dependencies for trading agent"""
+
+    trade_ctx: TradeContext
+    sell_token: str | None
+
+
 class AgentResponse(BaseModel):
     """Structured response from agent"""
 
     should_trade: bool
-    sell_token: str | None = None
     buy_token: str | None = None
     reasoning: str
 
@@ -198,24 +202,74 @@ class AgentDecision(BaseModel):
 
 trading_agent = Agent(
     "anthropic:claude-3-sonnet-20240229",
-    deps_type=TradeContext,
+    deps_type=AgentDependencies,
     result_type=AgentResponse,
     system_prompt=SYSTEM_PROMPT,
 )
 
 TOKEN_NAMES = {
-    "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb": "GNO",
-    "0x177127622c4A00F3d409B75571e12cB3c8973d3c": "COW",
-    "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1": "WETH",
-    "0x4d18815D14fe5c3304e87B3FA18318baa5c23820": "SAFE",
-    "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d": "WXDAI",
+    GNO: "GNO",
+    COW: "COW",
+    WXDAI: "WXDAI",
 }
 
 
-@trading_agent.tool_plain
+@trading_agent.tool_plain(retries=3)
 def get_token_name(address: str) -> str:
-    """Get human readable token name from contract address"""
-    return TOKEN_NAMES.get(address, address)
+    """Return a human-readable token name for the provided address."""
+    try:
+        return TOKEN_NAMES.get(address, address)
+    except Exception as e:
+        print(f"[get_token_name] failed with error: {e}")
+        raise
+
+
+@trading_agent.tool_plain(retries=3)
+def get_eligible_buy_tokens(ctx: AgentDependencies) -> List[str]:
+    """Return a list of tokens eligible for purchase (excluding the sell token)."""
+    try:
+        sell_token = ctx.sell_token
+        return [token for token in MONITORED_TOKENS if token != sell_token]
+    except Exception as e:
+        print(f"[get_eligible_buy_tokens] failed with error: {e}")
+        raise
+
+
+@trading_agent.tool_plain(retries=3)
+def get_token_type(token: str) -> Dict:
+    """Determine if the token is stable or volatile."""
+    try:
+        is_stable = token == WXDAI
+        return {
+            "token": get_token_name(token),
+            "is_stable": is_stable,
+            "expected_behavior": "USD value stable, good for preserving value"
+            if is_stable
+            else "USD value can fluctuate",
+        }
+    except Exception as e:
+        print(f"[get_token_type] failed with error: {e}")
+        raise
+
+
+@trading_agent.tool(retries=3)
+def get_trading_context(ctx: RunContext[AgentDependencies]) -> TradeContext:
+    """Return the trading context from the agent's dependencies."""
+    try:
+        return ctx.deps.trade_ctx
+    except Exception as e:
+        print(f"[get_trading_context] failed with error: {e}")
+        raise
+
+
+@trading_agent.tool(retries=3)
+def get_sell_token(ctx: RunContext[AgentDependencies]) -> str | None:
+    """Return the sell token from the agent's dependencies."""
+    try:
+        return ctx.deps.sell_token
+    except Exception as e:
+        print(f"[get_sell_token] failed with error: {e}")
+        raise
 
 
 def _get_token_balances() -> Dict[str, int]:
@@ -231,8 +285,7 @@ def _get_token_balances() -> Dict[str, int]:
     return {token_address: balance for token_address, balance in zip(MONITORED_TOKENS, results)}
 
 
-@trading_agent.tool_plain
-def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
+def _create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     """Create TradeContext with all required data"""
     trades_df = _load_trades_db()
     decisions_df = _load_decisions_db()
@@ -248,54 +301,45 @@ def create_trade_context(lookback_blocks: int = 15000) -> TradeContext:
     )
 
 
-@trading_agent.tool_plain
-def get_minimum_token_balances() -> Dict[str, float]:
-    """Get dictionary of minimum required balances for all monitored tokens"""
-    return {addr: float(amount) for addr, amount in MINIMUM_TOKEN_BALANCES.items()}
+def _select_sell_token() -> str | None:
+    """
+    Select token to sell based on current balances and minimum thresholds.
+    Returns the token address that has a balance above threshold, or None if no token qualifies.
+    """
+    balances = _get_token_balances()
+    valid_tokens = [
+        token for token in MONITORED_TOKENS if balances[token] > MINIMUM_TOKEN_BALANCES[token]
+    ]
+    return valid_tokens[0] if valid_tokens else None
 
 
 def _build_decision(
-    block_number: int, response: AgentResponse, metrics: List[TradeMetrics]
+    block_number: int,
+    response: AgentResponse,
+    metrics: List[TradeMetrics],
+    sell_token: str,
 ) -> AgentDecision:
-    """Build structured AgentDecision from raw response"""
+    """Build decision dict from agent response"""
     return AgentDecision(
         block_number=block_number,
         should_trade=response.should_trade,
-        sell_token=response.sell_token,
-        buy_token=response.buy_token,
+        sell_token=sell_token if response.should_trade else None,
+        buy_token=response.buy_token if response.should_trade else None,
         metrics_snapshot=metrics,
-        profitable=2,
+        reasoning=response.reasoning,
         valid=False,
     )
 
 
-def _validate_decision(decision: AgentDecision, trade_context: TradeContext) -> bool:
+def _validate_decision(decision: AgentDecision) -> bool:
     """
-    Validate decision structure, token validity, and balance requirements
-    Args:
-        decision: The trading decision to validate
-        trade_context: Current trading context with balances and metrics
-    Returns:
-        bool: True if valid, False otherwise
+    Validate decision structure and buy token validity
     """
-    if not decision.should_trade:
-        return True
-
-    if (
-        decision.sell_token not in MONITORED_TOKENS
-        or decision.buy_token not in MONITORED_TOKENS
-        or decision.sell_token == decision.buy_token
-    ):
-        click.echo(f"Invalid token pair: sell={decision.sell_token}, buy={decision.buy_token}")
+    if not decision.should_trade or decision.sell_token is None or decision.buy_token is None:
         return False
 
-    sell_balance = trade_context.token_balances[decision.sell_token]
-    min_balance = MINIMUM_TOKEN_BALANCES[decision.sell_token]
-
-    if sell_balance < min_balance:
-        click.echo(
-            f"Insufficient balance for {decision.sell_token}: {sell_balance} < {min_balance}"
-        )
+    if decision.buy_token not in MONITORED_TOKENS or decision.buy_token == decision.sell_token:
+        click.echo(f"Invalid buy token: buy={decision.buy_token}")
         return False
 
     return True
@@ -547,28 +591,6 @@ def _catch_up_trades(current_block: int, next_decision_block: int, buffer_blocks
     )
 
 
-def _extend_historical_trades() -> None:
-    """Extend trades.csv data further back in history"""
-    trades_df = _load_trades_db()
-
-    if len(trades_df) == 0:
-        oldest_block = chain.blocks.head.number
-    else:
-        oldest_block = trades_df["block_number"].min()
-
-    new_trades = _process_historical_trades(
-        GPV2_SETTLEMENT_CONTRACT,
-        start_block=oldest_block - HISTORICAL_BLOCK_STEP,
-        stop_block=oldest_block - 1,
-    )
-
-    new_trades_df = pd.DataFrame(new_trades)
-    all_trades = pd.concat([new_trades_df, trades_df])
-    all_trades = all_trades.sort_values("block_number", ascending=True)
-
-    _save_trades_db(all_trades)
-
-
 # CoW Swap trading helper functions
 def _construct_quote_payload(
     sell_token: str,
@@ -749,7 +771,7 @@ def exec_block(block: BlockAPI):
     if not should_trade:
         return
 
-    trade_ctx = create_trade_context()
+    trade_ctx = _create_trade_context()
 
     if latest_decision is not None and latest_decision.should_trade:
         _update_latest_decision_outcome(
@@ -761,12 +783,15 @@ def exec_block(block: BlockAPI):
             )
         )
 
+    sell_token = _select_sell_token()
+    deps = AgentDependencies(trade_ctx=trade_ctx, sell_token=sell_token)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     try:
         result = bot.state.agent.run_sync(
-            "Analyze current market conditions and make a trading decision", deps=trade_ctx
+            "Analyze current market conditions and make a trading decision", deps=deps
         )
     except Exception as e:
         click.echo(f"Anthropic API error at block {block.number}: {str(e)}")
@@ -775,10 +800,13 @@ def exec_block(block: BlockAPI):
     _save_reasoning(block.number, result.data.reasoning)
 
     decision = _build_decision(
-        block_number=block.number, response=result.data, metrics=trade_ctx.metrics
+        block_number=block.number,
+        response=result.data,
+        metrics=trade_ctx.metrics,
+        sell_token=sell_token,
     )
 
-    decision.valid = _validate_decision(decision, trade_ctx)
+    decision.valid = _validate_decision(decision)
     _save_decision(decision)
     bot.state.next_decision_block = block.number + TRADING_BLOCK_COOLDOWN
 
