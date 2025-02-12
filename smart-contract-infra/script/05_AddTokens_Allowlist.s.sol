@@ -7,7 +7,7 @@ import { TokenAllowlist } from "src/TokenAllowlist.sol";
 
 // Without verification:
 /*
-    forge script script/06_AddTokens_Allowlist.s.sol \
+    forge script script/05_AddTokens_Allowlist.s.sol \
     --rpc-url gnosis \
     --private-key $PRIVATE_KEY \
     --broadcast -vvvv

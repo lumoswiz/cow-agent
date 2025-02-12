@@ -31,7 +31,7 @@ contract DeployMasterCopy is ScriptUtils {
         uint256 pk = vm.envUint("PRIVATE_KEY");
 
         bytes memory creationCode = type(TradingModule).creationCode;
-        bytes memory constructorArgs = abi.encode(ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS);
+        bytes memory constructorArgs = abi.encode(vm.addr(pk), ZERO_ADDRESS, ZERO_ADDRESS);
         bytes memory initCode = abi.encodePacked(creationCode, constructorArgs);
 
         bytes32 salt = keccak256(abi.encodePacked("TradingModuleV1"));
