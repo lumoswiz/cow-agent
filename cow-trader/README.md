@@ -5,5 +5,5 @@ Automated CoW Swap trading agent built with Silverback SDK
 ## Run
 
 ```bash
-silverback run --network gnosis:mainnet:alchemy
+silverback run --network gnosis:mainnet:alchemy --account cow-agent
 ```
