@@ -285,7 +285,7 @@ def encourage_trade(ctx: RunContext[AgentDependencies]) -> str:
             f"I encourage you to sell {ctx.deps.sell_token}. Use the tool "
             "'get_eligible_buy_tokens' to get a list of eligible buy tokens, and from that "
             "list, pick the one that is most promising despite current market conditions. "
-            "Remember, we're experimenting and learning—feel free to consider unconventional choices."
+            "Remember, we're experimenting and learning—consider unconventional choices."
         )
     else:
         return ""
