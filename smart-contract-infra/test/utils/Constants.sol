@@ -9,8 +9,5 @@ contract Constants {
     address internal constant COW = 0x177127622c4A00F3d409B75571e12cB3c8973d3c;
 
     /// @notice Gnosis Chain WETH address
-    address internal constant WETH = 0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1;
-
-    /// @notice Gnosis Chain SAFE address
-    address internal constant SAFE = 0x5aFE3855358E112B5647B952709E6165e1c1eEEe;
+    address internal constant WXDAI = 0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d;
 }
