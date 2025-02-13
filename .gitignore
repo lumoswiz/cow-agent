@@ -18,6 +18,7 @@ dist/
 node_modules/
 out/
 wheels/
+__pycache__
 
 # Files
 *.egg-info
