@@ -20,6 +20,10 @@ from silverback import SilverbackBot, StateSnapshot
 # Initialize bot
 bot = SilverbackBot()
 
+# Config
+PROMPT_AUTOSIGN = bot.signer
+ENCOURAGE_TRADE = os.environ.get("ENCOURAGE_TRADE", False)
+
 # File path configuration
 TRADE_FILEPATH = os.environ.get("TRADE_FILEPATH", ".db/trades.csv")
 BLOCK_FILEPATH = os.environ.get("BLOCK_FILEPATH", ".db/block.csv")
@@ -29,8 +33,9 @@ REASONING_FILEPATH = os.environ.get("REASONING_FILEPATH", ".db/reasoning.csv")
 
 # Addresses
 SAFE_ADDRESS = "0xbc3c7818177dA740292659b574D48B699Fdf0816"
-TOKEN_ALLOWLIST_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+TOKEN_ALLOWLIST_ADDRESS = "0x98a4351d926e6274829c3807f39D9a7037462589"
 GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+TRADING_MODULE_ADDRESS = "0xF11bC1ff8Ab8Cc297e5a1f1A51B8d1792E99D648"
 
 GNO = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
@@ -38,9 +43,9 @@ WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
 MONITORED_TOKENS = [GNO, COW, WXDAI]
 
 MINIMUM_TOKEN_BALANCES = {
-    GNO: 5e16,
-    COW: 25e18,
-    WXDAI: 10e18,
+    GNO: 116,
+    COW: 10e18,
+    WXDAI: 5e18,
 }
 
 
@@ -54,7 +59,8 @@ def _load_abi(abi_name: str) -> Dict:
 
 # Contracts
 GPV2_SETTLEMENT_CONTRACT = Contract(GPV2_SETTLEMENT_ADDRESS, abi=_load_abi("GPv2Settlement"))
-TOKEN_ALLOWLIST_CONTRACt = Contract(TOKEN_ALLOWLIST_ADDRESS, abi=_load_abi("TokenAllowlist"))
+TOKEN_ALLOWLIST_CONTRACT = Contract(TOKEN_ALLOWLIST_ADDRESS, abi=_load_abi("TokenAllowlist"))
+TRADING_MODULE_CONTRACT = Contract(TRADING_MODULE_ADDRESS, abi=_load_abi("TradingModule"))
 
 
 # API
@@ -270,6 +276,19 @@ def get_sell_token(ctx: RunContext[AgentDependencies]) -> str | None:
     except Exception as e:
         print(f"[get_sell_token] failed with error: {e}")
         raise
+
+
+@trading_agent.system_prompt
+def encourage_trade(ctx: RunContext[AgentDependencies]) -> str:
+    if ENCOURAGE_TRADE:
+        return (
+            f"I encourage you to sell {ctx.deps.sell_token}. Use the tool "
+            "'get_eligible_buy_tokens' to get a list of eligible buy tokens, and from that "
+            "list, pick the one that is most promising despite current market conditions. "
+            "Remember, we're experimenting and learning—feel free to consider unconventional choices."
+        )
+    else:
+        return ""
 
 
 def _get_token_balances() -> Dict[str, int]:
@@ -507,23 +526,28 @@ def _save_decisions_db(df: pd.DataFrame) -> None:
 
 
 # Historical log helper functions
-def get_canonical_pair(token_a: str, token_b: str) -> tuple[str, str]:
+def _get_canonical_pair(token_a: str, token_b: str) -> tuple[str, str]:
     """Return tokens in canonical order (alphabetically by address)"""
     return (token_a, token_b) if token_a.lower() < token_b.lower() else (token_b, token_a)
 
 
-def calculate_price(sell_amount: str, buy_amount: str) -> float:
+def _calculate_price(sell_amount: str, buy_amount: str) -> float:
     """Calculate price from amounts"""
     return int(sell_amount) / int(buy_amount)
 
 
 def _process_trade_log(log) -> Dict:
-    """Process trade log with price calculation"""
-    token_a, token_b = get_canonical_pair(log.sellToken, log.buyToken)
-    price = calculate_price(log.sellAmount, log.buyAmount)
+    """
+    Process trade log and compute canonical price as:
+       canonical price = (quote token amount) / (base token amount)
+    where (token_a, token_b) is the canonical pair sorted lexicographically.
+    """
+    token_a, token_b = _get_canonical_pair(log.sellToken, log.buyToken)
 
-    if token_a != log.sellToken:
-        price = 1 / price
+    if log.sellToken == token_a:
+        price = int(log.buyAmount) / int(log.sellAmount)
+    else:
+        price = int(log.sellAmount) / int(log.buyAmount)
 
     return {
         "block_number": log.block_number,
@@ -604,7 +628,7 @@ def _construct_quote_payload(
     return {
         "sellToken": sell_token,
         "buyToken": buy_token,
-        "sellAmountBeforeFee": sell_amount,
+        "sellAmountBeforeFee": str(sell_amount),
         "from": SAFE_ADDRESS,
         "receiver": SAFE_ADDRESS,
         "appData": "{}",
@@ -694,7 +718,34 @@ def _save_order(order_uid: str, order_payload: Dict, signed: bool) -> None:
     _save_orders_db(df)
 
 
-def create_and_submit_order(
+def sign_order(order_uid: str, order_payload: dict) -> None:
+    """Sign order via TradingModule contract"""
+
+    BALANCE_ERC20 = "0x5a28e9363bb942b639270062aa6bb295f434bcdfc42c97267bf003f272060dc9"
+    KIND_SELL = "0xf3b277728b3fee749481eb3e0b3b48980dbbab78658fc419025cb16eee346775"
+
+    TRADING_MODULE_CONTRACT.setOrder(
+        order_uid,
+        (
+            order_payload["sellToken"],
+            order_payload["buyToken"],
+            order_payload["receiver"],
+            order_payload["sellAmount"],
+            order_payload["buyAmount"],
+            order_payload["validTo"],
+            order_payload["appDataHash"],
+            order_payload["feeAmount"],
+            KIND_SELL,
+            order_payload["partiallyFillable"],
+            BALANCE_ERC20,
+            BALANCE_ERC20,
+        ),
+        True,
+        sender=bot.signer,
+    )
+
+
+def create_submit_and_sign_order(
     sell_token: str,
     buy_token: str,
     sell_amount: str,
@@ -711,12 +762,13 @@ def create_and_submit_order(
         click.echo(f"Quote received: {quote}")
 
         order_payload = _construct_order_payload(quote)
-        click.echo(f"Submitting order payload: {order_payload}")
-
         order_uid = _submit_order(order_payload)
-        click.echo(f"Order response: {order_uid}")
+        click.echo(f"Order submitted: {order_uid}")
 
         _save_order(order_uid, order_payload, False)
+
+        click.echo("Signing order...")
+        sign_order(order_uid, order_payload)
 
         return order_uid, None
 
@@ -728,6 +780,9 @@ def create_and_submit_order(
 @bot.on_startup()
 def bot_startup(startup_state: StateSnapshot):
     """Initialize bot state and historical data"""
+    if PROMPT_AUTOSIGN and click.confirm("Enable autosign?"):
+        bot.signer.set_autosign(enabled=True)
+
     block_db = _load_block_db()
     last_processed_block = block_db["last_processed_block"]
     _save_block_db({"last_processed_block": chain.blocks.head.number})
@@ -811,7 +866,7 @@ def exec_block(block: BlockAPI):
     bot.state.next_decision_block = block.number + TRADING_BLOCK_COOLDOWN
 
     if decision.valid:
-        order_uid, error = create_and_submit_order(
+        order_uid, error = create_submit_and_sign_order(
             sell_token=decision.sell_token,
             buy_token=decision.buy_token,
             sell_amount=trade_ctx.token_balances[decision.sell_token],
