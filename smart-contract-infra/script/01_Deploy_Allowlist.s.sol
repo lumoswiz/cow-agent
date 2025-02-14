@@ -14,14 +14,6 @@ import { TokenAllowlist } from "src/TokenAllowlist.sol";
     --broadcast -vvvv
 */
 
-// Without verification:
-/*
-    forge script script/01_Deploy_Allowlist.s.sol \
-    --rpc-url gnosis \
-    --private-key $PRIVATE_KEY \
-    --broadcast -vvvv
-*/
-
 contract DeployAllowlist is ScriptUtils {
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");

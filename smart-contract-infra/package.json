@@ -28,7 +28,14 @@
     "test": "forge test",
     "test:coverage": "forge coverage",
     "test:coverage:report": "forge coverage --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage",
-    "enable-module": "bun run script/safe/enable-module.ts",
-    "configure-module": "bun run script/safe/module-config.ts"
+    "safe:deploy": "bun run script/safe/deploy-safe.ts",
+    "module:deploy": "bun run script/safe/deploy-module.ts",
+    "module:configure": "bun run script/safe/module-config.ts",
+    "safe:enable": "bun run script/safe/enable-module.ts",
+    "safe:deploy-all": "bun run script/safe/deploy-all.ts",
+    "allowlist:deploy": "forge script script/01_Deploy_Allowlist.s.sol:DeployAllowlist --rpc-url gnosis --private-key $PRIVATE_KEY --broadcast -vvvv",
+    "allowlist:enable-tokens": "forge script script/01A_AddTokens_Allowlist.s.sol:AddTokensScript --rpc-url gnosis --private-key $PRIVATE_KEY --broadcast -vvvv",
+    "guard:deploy": "forge script script/02_Deploy_CoWSwapGuard.s.sol:DeployGuard --rpc-url gnosis --private-key $PRIVATE_KEY --broadcast -vvvv",
+    "mastercopy:deploy": "forge script script/03_Deploy_MasterCopy.s.sol:DeployMasterCopy --rpc-url gnosis --private-key $PRIVATE_KEY --broadcast -vvvv"
   }
 }

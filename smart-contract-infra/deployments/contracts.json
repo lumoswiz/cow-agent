@@ -1,12 +1,5 @@
 {
-  "deployedChains": [
-    1,
-    100,
-    8453,
-    31337,
-    42161,
-    11155111
-  ],
+  "deployedChains": [1, 100, 8453, 31337, 42161, 11155111],
   "chains": {
     "1": {
       "allowlist": "0x0000000000000000000000000000000000000000",
@@ -16,9 +9,9 @@
       "safe": "0x0000000000000000000000000000000000000000"
     },
     "100": {
-      "allowlist": "0x98a4351d926e6274829c3807f39D9a7037462589",
-      "guard": "0xcab68170145d593F15BF398670876CcCBFe173e2",
-      "tradingModuleMasterCopy": "0xDdd11DC80A25563Cb416647821f3BC5Ad75fF1BA",
+      "allowlist": "0xE0CBa604f8be035a80D21b49C67BdcE59Bba9d76",
+      "guard": "0xF67966246d72fC124d19B7F2d03DD690B756De88",
+      "tradingModuleMasterCopy": "0x0000000000000000000000000000000000000000",
       "tradingModuleProxy": "0xF11bC1ff8Ab8Cc297e5a1f1A51B8d1792E99D648",
       "safe": "0xbc3c7818177dA740292659b574D48B699Fdf0816"
     },

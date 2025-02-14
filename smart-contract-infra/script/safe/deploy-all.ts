@@ -1,5 +1,5 @@
-import { type Chain, type Address } from "viem";
-import { getWalletClient } from "./config";
+import { type Address } from "viem";
+import { CHAIN, getWalletClient } from "./config";
 import { deploySafe } from "./deploy-safe";
 import { deployModule } from "./deploy-module";
 import { configureModule } from "./module-config";
