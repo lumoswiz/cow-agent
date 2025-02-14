@@ -847,9 +847,12 @@ def update_state(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
         return {"message": "No previous decisions", "can_trade": True}
 
     latest_decision = context.state.decisions_df.iloc[-1]
-    click.echo(
-        f"[{block.number}] Latest: trade={latest_decision.should_trade}, block={latest_decision.block_number}"
+    msg = (
+        f"[{block.number}] Latest: "
+        f"trade={latest_decision.should_trade}, "
+        f"block={latest_decision.block_number}"
     )
+    click.echo(msg)
 
     if not latest_decision.should_trade:
         click.echo(f"[{block.number}] Last decision wasn't a trade, enabling trading")
@@ -873,7 +876,7 @@ def update_state(block: BlockAPI, context: Annotated[Context, TaskiqDepends()]):
 
     if not matching_metrics:
         click.echo(
-            f"[{block.number}] No metrics for {latest_decision.sell_token}-{latest_decision.buy_token}"
+            f"[{block.number}] No metrics {latest_decision.sell_token}-{latest_decision.buy_token}"
         )
         context.state.decisions_df = _update_latest_decision_outcome(
             decisions_df=context.state.decisions_df,
