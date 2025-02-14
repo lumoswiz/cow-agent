@@ -32,11 +32,33 @@ ORDERS_FILEPATH = os.environ.get("ORDERS_FILEPATH", ".db/orders.csv")
 DECISIONS_FILEPATH = os.environ.get("DECISIONS_FILEPATH", ".db/decisions.csv")
 REASONING_FILEPATH = os.environ.get("REASONING_FILEPATH", ".db/reasoning.csv")
 
+
+# Loading contract helper functions
+def _load_contracts_deployments(
+    filepath: str = "../smart-contract-infra/deployments/contracts.json",
+) -> dict:
+    with Path(filepath).open() as f:
+        return json.load(f)
+
+
+def _get_contract_address(contract_key: str, chain_id: int = 100) -> str:
+    contracts = _load_contracts_deployments()
+    chain_key = str(chain_id)
+    try:
+        return contracts["chains"][chain_key][contract_key]
+    except KeyError:
+        raise Exception(f"{contract_key} not found for chain ID {chain_id}")
+
+
 # Addresses
-SAFE_ADDRESS = "0xbc3c7818177dA740292659b574D48B699Fdf0816"
-TOKEN_ALLOWLIST_ADDRESS = "0x98a4351d926e6274829c3807f39D9a7037462589"
 GPV2_SETTLEMENT_ADDRESS = "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
-TRADING_MODULE_ADDRESS = "0xF11bC1ff8Ab8Cc297e5a1f1A51B8d1792E99D648"
+TOKEN_ALLOWLIST_ADDRESS = os.environ.get(
+    "TOKEN_ALLOWLIST_ADDRESS", _get_contract_address("allowlist", 100)
+)
+SAFE_ADDRESS = os.environ.get("SAFE_ADDRESS", _get_contract_address("safe", 100))
+TRADING_MODULE_ADDRESS = os.environ.get(
+    "TRADING_MODULE_ADDRESS", _get_contract_address("tradingModuleProxy", 100)
+)
 
 GNO = "0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb"
 COW = "0x177127622c4A00F3d409B75571e12cB3c8973d3c"
@@ -44,7 +66,7 @@ WXDAI = "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d"
 MONITORED_TOKENS = [GNO, COW, WXDAI]
 
 MINIMUM_TOKEN_BALANCES = {
-    GNO: 116,
+    GNO: 55e14,
     COW: 10e18,
     WXDAI: 5e18,
 }
@@ -70,8 +92,6 @@ API_HEADERS = {"accept": "application/json", "Content-Type": "application/json"}
 
 # Variables
 START_BLOCK = int(os.environ.get("START_BLOCK", chain.blocks.head.number))
-HISTORICAL_BLOCK_STEP = int(os.environ.get("HISTORICAL_BLOCK_STEP", 720))
-EXTENSION_INTERVAL = int(os.environ.get("EXTENSION_INTERVAL", 6))
 TRADING_BLOCK_COOLDOWN = int(os.environ.get("TRADING_BLOCK_COOLDOWN", 360))
 SYSTEM_PROMPT = Path("./system_prompt.txt").read_text().strip()
 
@@ -533,11 +553,6 @@ def _save_decisions_db(df: pd.DataFrame) -> None:
 def _get_canonical_pair(token_a: str, token_b: str) -> tuple[str, str]:
     """Return tokens in canonical order (alphabetically by address)"""
     return (token_a, token_b) if token_a.lower() < token_b.lower() else (token_b, token_a)
-
-
-def _calculate_price(sell_amount: str, buy_amount: str) -> float:
-    """Calculate price from amounts"""
-    return int(sell_amount) / int(buy_amount)
 
 
 def _process_trade_log(log) -> Dict:
