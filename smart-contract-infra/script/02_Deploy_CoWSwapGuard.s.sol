@@ -14,14 +14,6 @@ import { CoWSwapGuard } from "src/CoWSwapGuard.sol";
     --broadcast -vvvv
 */
 
-// Without verification:
-/*
-    forge script script/02_Deploy_CoWSwapGuard.s.sol \
-    --rpc-url gnosis \
-    --private-key $PRIVATE_KEY \
-    --broadcast -vvvv
-*/
-
 contract DeployGuard is ScriptUtils {
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");

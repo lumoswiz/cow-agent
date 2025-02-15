@@ -18,14 +18,6 @@ interface ISingletonFactory {
     --broadcast -vvvv
 */
 
-// Without verification:
-/*
-    forge script script/03_Deploy_MasterCopy.s.sol \
-    --rpc-url gnosis \
-    --private-key $PRIVATE_KEY \
-    --broadcast -vvvv
-*/
-
 contract DeployMasterCopy is ScriptUtils {
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
