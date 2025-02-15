@@ -13,6 +13,7 @@
 
 - **[Bun](https://bun.sh)** `v1.1.31`
 - **[uv](https://docs.astral.sh/uv/getting-started/)** `v0.5.26`
+- **[Foundry](https://book.getfoundry.sh/)** `v0.3.0`
 
 ## Monorepo Contents
 
