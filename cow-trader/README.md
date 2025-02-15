@@ -77,3 +77,7 @@ Other key components include:
   - During worker initialization (`worker_startup`), each worker (both block handlers) gets access to shared state—including the trading agent instance, historical trades, and past decisions.
 
 This design ensures the bot continuously tracks market activity, leverages an AI agent for dynamic decision-making, and safely executes trades on CoW Swap.
+
+## Acknowledgements
+
+- [Marginal Protocol](https://github.com/MarginalProtocol/v1-liquidator-bot)
