@@ -9,9 +9,6 @@
 [license]: https://opensource.org/licenses/MIT
 [license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg
 
-Welcome to **Moozilla x Kong**  
-Your project description goes here...
-
 ## Development Prerequisites
 
 - **[Bun](https://bun.sh)** `v1.1.31`
@@ -56,7 +53,7 @@ Each variable is explained in the `.env.example` file. Be sure to copy `.env.exa
 - **Web3 Variables:**
   - `PRIVATE_KEY`
   - `WEB3_ALCHEMY_PROJECT_ID`
-  - `GNOSISSCAN_API_KEY`
+  - `ETHERSCAN_API_KEY`
   - `CHAIN_ID`
   - `SAFE_ADDRESS` (optional)
   - `TRADING_MODULE_ADDRESS` (optional)
